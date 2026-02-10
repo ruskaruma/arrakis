@@ -5,6 +5,16 @@ const router = Router();
 
 const VALID_ENGINES = ['woocommerce', 'medusajs'];
 
+function auditLog(action: string, storeId: string, ip: string | undefined): void {
+  console.log(JSON.stringify({
+    timestamp: new Date().toISOString(),
+    action,
+    storeId,
+    ip: ip || 'unknown',
+    level: 'audit',
+  }));
+}
+
 // POST /api/stores
 router.post('/api/stores', async (req: Request, res: Response) => {
   try {
@@ -14,7 +24,19 @@ router.post('/api/stores', async (req: Request, res: Response) => {
       return;
     }
 
+    if (engine === 'medusajs') {
+      res.status(501).json({ error: 'MedusaJS engine coming soon. Currently only WooCommerce is supported.' });
+      return;
+    }
+
+    const existing = await listStores();
+    if (existing.length >= 10) {
+      res.status(429).json({ error: 'Maximum 10 stores allowed. Delete existing stores first.' });
+      return;
+    }
+
     const store = await createStore(engine);
+    auditLog('store.created', store.id, req.ip);
     res.status(201).json(store);
   } catch (err: any) {
     console.error('POST /api/stores error:', err.message);
@@ -56,6 +78,7 @@ router.delete('/api/stores/:id', async (req: Request, res: Response) => {
       res.status(404).json({ error: 'Store not found' });
       return;
     }
+    auditLog('store.deleted', req.params.id, req.ip);
     res.status(204).send();
   } catch (err: any) {
     console.error(`DELETE /api/stores/${req.params.id} error:`, err.message);

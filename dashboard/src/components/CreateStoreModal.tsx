@@ -30,11 +30,20 @@ export default function CreateStoreModal({ onClose, onCreated }: CreateStoreModa
         <h2 className="text-lg font-semibold mb-4">Create Store</h2>
 
         <div className="mb-4">
-          <label className="block text-sm font-medium text-gray-700 mb-1">Engine</label>
-          <div className="px-3 py-2 border border-gray-300 rounded-md bg-gray-50 text-sm text-gray-700">
-            WooCommerce
+          <label className="block text-sm font-medium text-gray-700 mb-2">Engine</label>
+          <div className="space-y-2">
+            <div className="flex items-center px-3 py-2 border-2 border-blue-500 rounded-md bg-blue-50 cursor-default">
+              <div className="w-4 h-4 border-2 border-blue-500 rounded-full mr-3 flex items-center justify-center">
+                <div className="w-2 h-2 bg-blue-500 rounded-full" />
+              </div>
+              <span className="text-sm font-medium text-gray-900">WooCommerce</span>
+            </div>
+            <div className="flex items-center px-3 py-2 border border-gray-200 rounded-md bg-gray-50 cursor-not-allowed opacity-50">
+              <div className="w-4 h-4 border-2 border-gray-300 rounded-full mr-3" />
+              <span className="text-sm text-gray-400">MedusaJS</span>
+              <span className="ml-auto text-xs text-gray-400 italic">Coming Soon</span>
+            </div>
           </div>
-          <p className="mt-1 text-xs text-gray-500">More engines coming soon</p>
         </div>
 
         {error && (

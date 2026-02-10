@@ -11,7 +11,7 @@ import { setupWooCommerce } from './woocommerce-setup';
 import { verifyStore } from './store-verifier';
 import { log } from './logger';
 
-const PROVISION_TIMEOUT_MS = 15 * 60 * 1_000;
+const PROVISION_TIMEOUT_MS = 10 * 60 * 1_000;
 
 const CHART_PATH = path.resolve(__dirname, '../../helm-charts/woocommerce');
 const VALUES_FILE = path.resolve(CHART_PATH, 'values-local.yaml');
@@ -51,6 +51,19 @@ export async function reconcile(store: Store): Promise<void> {
 
     const phase = store.status?.phase;
     if (phase === 'Ready' || phase === 'Failed') return;
+
+    //Provisioning timeout
+    if ((phase === 'Provisioning' || phase === 'Configuring') && store.status?.startedAt) {
+      const elapsed = Date.now() - new Date(store.status.startedAt).getTime();
+      if (elapsed > PROVISION_TIMEOUT_MS) {
+        await updateStoreStatus(storeId, {
+          phase: 'Failed',
+          message: 'Provisioning timed out after 10 minutes',
+        });
+        log.warn('reconcile.timeout', 'Provisioning timed out', { storeId, elapsed });
+        return;
+      }
+    }
 
     // ── Namespace + ResourceQuota ────────────────────────────────────────────
 
@@ -92,19 +105,6 @@ export async function reconcile(store: Store): Promise<void> {
     // ── Pod Readiness ───────────────────────────────────────────────────────
 
     if (!(await allPodsReady(ns))) {
-      const startedAt = store.status?.startedAt || store.metadata.creationTimestamp;
-      if (startedAt) {
-        const elapsed = Date.now() - new Date(startedAt).getTime();
-        if (elapsed > PROVISION_TIMEOUT_MS) {
-          const pods = await getPodsReady(ns);
-          await updateStoreStatus(storeId, {
-            phase: 'Failed',
-            message: `Timed out waiting for pods (${pods.ready}/${pods.total} ready after 15m)`,
-          });
-          return;
-        }
-      }
-
       const pods = await getPodsReady(ns);
       await updateStoreStatus(storeId, {
         phase: 'Provisioning',
