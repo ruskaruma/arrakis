@@ -1,0 +1,13 @@
+{
+  "name": "arrakis-tests",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "test": "ts-node integration/integration.test.ts"
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "ts-node": "^10.9.0",
+    "typescript": "^5.3.0"
+  }
+}

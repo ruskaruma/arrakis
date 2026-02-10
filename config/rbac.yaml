@@ -1,0 +1,72 @@
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: arrakis-operator
+  namespace: default
+  labels:
+    app.kubernetes.io/managed-by: arrakis
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: arrakis-operator
+  labels:
+    app.kubernetes.io/managed-by: arrakis
+rules:
+  # Store CRDs
+  - apiGroups: ["arrakis.io"]
+    resources: ["stores"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["arrakis.io"]
+    resources: ["stores/status"]
+    verbs: ["patch"]
+  - apiGroups: ["arrakis.io"]
+    resources: ["stores/finalizers"]
+    verbs: ["patch"]
+  # Namespaces
+  - apiGroups: [""]
+    resources: ["namespaces"]
+    verbs: ["get", "list", "create", "delete"]
+  # ResourceQuotas
+  - apiGroups: [""]
+    resources: ["resourcequotas"]
+    verbs: ["create", "get"]
+  # LimitRanges
+  - apiGroups: [""]
+    resources: ["limitranges"]
+    verbs: ["create", "get"]
+  # Pods
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["get", "list"]
+  # Pod exec (for WP-CLI)
+  - apiGroups: [""]
+    resources: ["pods/exec"]
+    verbs: ["create"]
+  # Events
+  - apiGroups: [""]
+    resources: ["events"]
+    verbs: ["list"]
+  # NetworkPolicies
+  - apiGroups: ["networking.k8s.io"]
+    resources: ["networkpolicies"]
+    verbs: ["create", "get"]
+  # Deployments (for kubectl exec deploy/)
+  - apiGroups: ["apps"]
+    resources: ["deployments"]
+    verbs: ["get"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: arrakis-operator
+  labels:
+    app.kubernetes.io/managed-by: arrakis
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: arrakis-operator
+subjects:
+  - kind: ServiceAccount
+    name: arrakis-operator
+    namespace: default

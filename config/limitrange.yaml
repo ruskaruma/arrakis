@@ -1,0 +1,17 @@
+# Template — applied programmatically per store namespace by the operator.
+apiVersion: v1
+kind: LimitRange
+metadata:
+  name: store-limits
+spec:
+  limits:
+    - type: Container
+      default:
+        cpu: 500m
+        memory: 512Mi
+      defaultRequest:
+        cpu: 100m
+        memory: 128Mi
+    - type: PersistentVolumeClaim
+      max:
+        storage: 5Gi
