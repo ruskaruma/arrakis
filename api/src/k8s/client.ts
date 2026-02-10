@@ -14,7 +14,7 @@ const coreApi = kc.makeApiClient(k8s.CoreV1Api);
 // ─── Create Store ──────────────────────────────────────────────────────────
 
 export async function createStore(engine: string) {
-  const id = crypto.randomBytes(4).toString('hex');
+  const id = `s${crypto.randomBytes(4).toString('hex')}`;
 
   const body = {
     apiVersion: `${CRD_GROUP}/${CRD_VERSION}`,

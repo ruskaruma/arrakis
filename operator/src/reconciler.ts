@@ -6,6 +6,8 @@ import {
   hasFinalizer, addFinalizer, removeFinalizer,
 } from './k8s-helpers';
 import { HelmManager } from './helm-manager';
+import { setupWooCommerce } from './woocommerce-setup';
+import { verifyStore } from './store-verifier';
 import { log } from './logger';
 
 const PROVISION_TIMEOUT_MS = 15 * 60 * 1_000;
@@ -110,8 +112,53 @@ export async function reconcile(store: Store): Promise<void> {
 
     log.info('reconcile.pods', 'All pods ready', { storeId, namespace: ns });
 
-    // TODO: Provisioning → Configuring (WP-CLI setup) → Verifying → Ready
-    // For now, skip Configuring/Verifying and go straight to Ready
+    // ── Configuring (WP-CLI setup) ───────────────────────────────────────
+    // Skip WP-CLI if we already completed it (phase is Verifying from a previous run)
+
+    if (phase !== 'Verifying') {
+      await updateStoreStatus(storeId, {
+        phase: 'Configuring',
+        message: 'Running WooCommerce setup via WP-CLI',
+      });
+
+      try {
+        await setupWooCommerce(storeId, ns);
+      } catch (err: any) {
+        await updateStoreStatus(storeId, {
+          phase: 'Failed',
+          message: `WooCommerce setup failed: ${err.message}`,
+        });
+        return;
+      }
+
+      await updateStoreStatus(storeId, {
+        phase: 'Verifying',
+        message: 'Verifying store configuration',
+      });
+    }
+
+    // ── Verifying ────────────────────────────────────────────────────────
+
+    let verified: boolean;
+    try {
+      verified = await verifyStore(storeId, ns);
+    } catch (err: any) {
+      await updateStoreStatus(storeId, {
+        phase: 'Failed',
+        message: `Verification error: ${err.message}`,
+      });
+      return;
+    }
+
+    if (!verified) {
+      await updateStoreStatus(storeId, {
+        phase: 'Failed',
+        message: 'Store verification failed (HTTP or product check)',
+      });
+      return;
+    }
+
+    // ── Ready ────────────────────────────────────────────────────────────
 
     const storeUrl = `http://${storeId}.127.0.0.1.nip.io`;
     await updateStoreStatus(storeId, {
