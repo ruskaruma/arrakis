@@ -66,3 +66,11 @@ spec:
                 message:
                   type: string
                   description: Human-readable message with details about the current phase or error.
+                startedAt:
+                  type: string
+                  format: date-time
+                  description: Timestamp when provisioning started.
+                readyAt:
+                  type: string
+                  format: date-time
+                  description: Timestamp when the store became ready.

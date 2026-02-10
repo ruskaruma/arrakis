@@ -5,6 +5,7 @@ import Header from './components/Header.tsx';
 import CreateStoreModal from './components/CreateStoreModal.tsx';
 import StoreCard from './components/StoreCard.tsx';
 import EmptyState from './components/EmptyState.tsx';
+import ActivityLog from './components/ActivityLog.tsx';
 
 const POLL_INTERVAL = 5000;
 
@@ -30,22 +31,22 @@ export default function App() {
   }, [loadStores]);
 
   return (
-    <div className="min-h-screen bg-gray-50">
+    <div className="min-h-screen bg-slate-50">
       <Header storeCount={stores.length} />
 
-      <main className="max-w-4xl mx-auto px-6 py-8">
+      <main className="max-w-5xl mx-auto px-6 py-8">
         <div className="flex items-center justify-between mb-6">
           <h2 className="text-lg font-semibold text-gray-900">Stores</h2>
           <button
             onClick={() => setShowModal(true)}
-            className="px-4 py-2 text-sm text-white bg-blue-600 rounded-md hover:bg-blue-700"
+            className="px-4 py-2 text-sm font-medium text-white bg-indigo-600 rounded-lg hover:bg-indigo-700 transition-colors shadow-sm"
           >
             Create Store
           </button>
         </div>
 
         {error && (
-          <div className="mb-6 px-4 py-3 bg-red-50 border border-red-200 rounded-md text-sm text-red-700">
+          <div className="mb-6 px-4 py-3 bg-red-50 border border-red-200 rounded-xl text-sm text-red-700">
             {error}
           </div>
         )}
@@ -57,6 +58,12 @@ export default function App() {
             {stores.map(store => (
               <StoreCard key={store.id} store={store} onDeleted={loadStores} />
             ))}
+          </div>
+        )}
+
+        {stores.length > 0 && (
+          <div className="mt-8">
+            <ActivityLog />
           </div>
         )}
       </main>

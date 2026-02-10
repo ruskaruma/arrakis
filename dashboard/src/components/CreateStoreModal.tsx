@@ -25,44 +25,67 @@ export default function CreateStoreModal({ onClose, onCreated }: CreateStoreModa
   }
 
   return (
-    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50" onClick={onClose}>
-      <div className="bg-white rounded-lg shadow-xl p-6 w-full max-w-sm" onClick={e => e.stopPropagation()}>
-        <h2 className="text-lg font-semibold mb-4">Create Store</h2>
+    <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50 p-4" onClick={onClose}>
+      <div
+        className="bg-white rounded-2xl shadow-2xl w-full max-w-md overflow-hidden"
+        onClick={e => e.stopPropagation()}
+      >
+        <div className="px-6 pt-6 pb-4">
+          <h2 className="text-lg font-semibold text-gray-900">Create New Store</h2>
+          <p className="text-sm text-gray-500 mt-1">Select an e-commerce engine for your store.</p>
+        </div>
 
-        <div className="mb-4">
-          <label className="block text-sm font-medium text-gray-700 mb-2">Engine</label>
-          <div className="space-y-2">
-            <div className="flex items-center px-3 py-2 border-2 border-blue-500 rounded-md bg-blue-50 cursor-default">
-              <div className="w-4 h-4 border-2 border-blue-500 rounded-full mr-3 flex items-center justify-center">
-                <div className="w-2 h-2 bg-blue-500 rounded-full" />
-              </div>
-              <span className="text-sm font-medium text-gray-900">WooCommerce</span>
+        <div className="px-6 pb-5 space-y-3">
+          <div className="flex items-center gap-4 p-4 rounded-xl border-2 border-indigo-500 bg-indigo-50/50 cursor-default">
+            <div className="w-10 h-10 rounded-lg bg-indigo-100 flex items-center justify-center shrink-0">
+              <svg className="w-5 h-5 text-indigo-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M2.25 3h1.386c.51 0 .955.343 1.087.835l.383 1.437M7.5 14.25a3 3 0 0 0-3 3h15.75m-12.75-3h11.218c1.121-2.3 2.1-4.684 2.924-7.138a60.114 60.114 0 0 0-16.536-1.84M7.5 14.25 5.106 5.272M6 20.25a.75.75 0 1 1-1.5 0 .75.75 0 0 1 1.5 0Zm12.75 0a.75.75 0 1 1-1.5 0 .75.75 0 0 1 1.5 0Z" />
+              </svg>
             </div>
-            <div className="flex items-center px-3 py-2 border border-gray-200 rounded-md bg-gray-50 cursor-not-allowed opacity-50">
-              <div className="w-4 h-4 border-2 border-gray-300 rounded-full mr-3" />
-              <span className="text-sm text-gray-400">MedusaJS</span>
-              <span className="ml-auto text-xs text-gray-400 italic">Coming Soon</span>
+            <div className="flex-1 min-w-0">
+              <p className="text-sm font-semibold text-gray-900">WooCommerce</p>
+              <p className="text-xs text-gray-500">WordPress + WooCommerce</p>
             </div>
+            <div className="w-5 h-5 rounded-full border-2 border-indigo-500 flex items-center justify-center shrink-0">
+              <div className="w-2.5 h-2.5 rounded-full bg-indigo-500" />
+            </div>
+          </div>
+
+          <div className="relative flex items-center gap-4 p-4 rounded-xl border border-gray-200 bg-gray-50 cursor-not-allowed opacity-60">
+            <div className="w-10 h-10 rounded-lg bg-gray-200 flex items-center justify-center shrink-0">
+              <svg className="w-5 h-5 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="m3.75 13.5 10.5-11.25L12 10.5h8.25L9.75 21.75 12 13.5H3.75Z" />
+              </svg>
+            </div>
+            <div className="flex-1 min-w-0">
+              <p className="text-sm font-semibold text-gray-500">MedusaJS</p>
+              <p className="text-xs text-gray-400">Headless commerce platform</p>
+            </div>
+            <span className="shrink-0 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-gray-400 bg-gray-200 rounded-full">
+              Coming Soon
+            </span>
           </div>
         </div>
 
         {error && (
-          <p className="text-sm text-red-600 mb-4">{error}</p>
+          <div className="mx-6 mb-4 px-3 py-2 bg-red-50 border border-red-200 rounded-lg text-sm text-red-700">
+            {error}
+          </div>
         )}
 
-        <div className="flex justify-end gap-2">
+        <div className="flex items-center justify-end gap-3 px-6 py-4 border-t border-gray-100">
           <button
             onClick={onClose}
-            className="px-4 py-2 text-sm text-gray-700 border border-gray-300 rounded-md hover:bg-gray-50"
+            className="px-4 py-2 text-sm font-medium text-gray-700 border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors"
           >
             Cancel
           </button>
           <button
             onClick={handleCreate}
             disabled={loading}
-            className="px-4 py-2 text-sm text-white bg-blue-600 rounded-md hover:bg-blue-700 disabled:opacity-50"
+            className="px-5 py-2 text-sm font-medium text-white bg-indigo-600 rounded-lg hover:bg-indigo-700 disabled:opacity-50 transition-colors"
           >
-            {loading ? 'Creating...' : 'Create'}
+            {loading ? 'Creating...' : 'Create Store'}
           </button>
         </div>
       </div>

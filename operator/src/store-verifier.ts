@@ -7,12 +7,15 @@ const execFileAsync = promisify(execFile);
 const CMD_TIMEOUT_MS = 2 * 60 * 1000; // 2 minutes per command
 
 async function kubectlExec(storeId: string, namespace: string, command: string[]): Promise<string> {
-  const { stdout } = await execFileAsync('kubectl', [
+  const { stdout, stderr } = await execFileAsync('kubectl', [
     'exec', `deploy/${storeId}-wordpress`,
     '-n', namespace,
     '--',
     ...command,
   ], { timeout: CMD_TIMEOUT_MS });
+  if (stderr.trim()) {
+    log.warn('kubectlExec.stderr', stderr.trim(), { storeId, command: command.join(' ') });
+  }
   return stdout;
 }
 

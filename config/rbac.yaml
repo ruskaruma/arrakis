@@ -16,7 +16,7 @@ rules:
   # Store CRDs
   - apiGroups: ["arrakis.io"]
     resources: ["stores"]
-    verbs: ["get", "list", "watch"]
+    verbs: ["get", "list", "watch", "patch"]
   - apiGroups: ["arrakis.io"]
     resources: ["stores/status"]
     verbs: ["patch"]

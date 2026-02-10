@@ -163,7 +163,7 @@ export async function reconcile(store: Store): Promise<void> {
 
     // ── Ready ────────────────────────────────────────────────────────────
 
-    const storeUrl = `http://${storeId}.127.0.0.1.nip.io`;
+    const storeUrl = `http://${storeId}.127.0.0.1.nip.io/shop`;
     await updateStoreStatus(storeId, {
       phase: 'Ready',
       message: 'Store is running',

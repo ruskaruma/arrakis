@@ -121,15 +121,36 @@ export async function getStoreEvents(id: string) {
       namespace: `store-${id}`,
     });
 
-    return (result.items || []).map((event) => ({
-      type: event.type || null,
-      reason: event.reason || null,
-      message: event.message || null,
-      firstTimestamp: event.firstTimestamp || null,
-      lastTimestamp: event.lastTimestamp || null,
+    const events = (result.items || []).map((event) => ({
+      type: event.type || 'Normal',
+      reason: event.reason || '',
+      message: event.message || '',
+      timestamp: (event.lastTimestamp || event.firstTimestamp || new Date()).toISOString(),
+      component: event.source?.component || '',
     }));
+
+    events.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
+    return events.slice(0, 50);
   } catch (err: any) {
     if (err?.code === 404) return [];
     throw err;
   }
+}
+
+export async function getAllEvents() {
+  const stores = await listStores();
+  const allEvents: Array<{
+    type: string; reason: string; message: string;
+    timestamp: string; component: string; storeId: string;
+  }> = [];
+
+  for (const store of stores) {
+    const events = await getStoreEvents(store.id);
+    for (const e of events) {
+      allEvents.push({ ...e, storeId: store.id });
+    }
+  }
+
+  allEvents.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
+  return allEvents.slice(0, 100);
 }

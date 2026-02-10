@@ -1,5 +1,5 @@
 import { Router, Request, Response } from 'express';
-import { createStore, listStores, getStore, deleteStore, getStoreEvents } from '../k8s/client';
+import { createStore, listStores, getStore, deleteStore, getStoreEvents, getAllEvents } from '../k8s/client';
 
 const router = Router();
 
@@ -93,6 +93,17 @@ router.get('/api/stores/:id/events', async (req: Request, res: Response) => {
     res.status(200).json(events);
   } catch (err: any) {
     console.error(`GET /api/stores/${req.params.id}/events error:`, err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// GET /api/events
+router.get('/api/events', async (_req: Request, res: Response) => {
+  try {
+    const events = await getAllEvents();
+    res.status(200).json(events);
+  } catch (err: any) {
+    console.error('GET /api/events error:', err.message);
     res.status(500).json({ error: err.message });
   }
 });
