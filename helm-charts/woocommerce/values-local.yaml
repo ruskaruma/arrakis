@@ -1,0 +1,33 @@
+wordpress:
+  service:
+    type: ClusterIP
+
+  ingress:
+    enabled: true
+    ingressClassName: traefik
+    hostname: "store.127.0.0.1.nip.io"
+
+  persistence:
+    storageClass: local-path
+    size: 1Gi
+
+  resources:
+    requests:
+      cpu: 50m
+      memory: 256Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi
+
+  mariadb:
+    primary:
+      persistence:
+        storageClass: local-path
+        size: 1Gi
+      resources:
+        requests:
+          cpu: 50m
+          memory: 256Mi
+        limits:
+          cpu: 500m
+          memory: 512Mi

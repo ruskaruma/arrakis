@@ -1,0 +1,10 @@
+apiVersion: v2
+name: arrakis-woocommerce
+description: WooCommerce store provisioned by Arrakis
+version: 0.1.0
+type: application
+
+dependencies:
+  - name: wordpress
+    version: "28.x.x"
+    repository: https://charts.bitnami.com/bitnami

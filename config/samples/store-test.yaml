@@ -1,0 +1,7 @@
+apiVersion: arrakis.io/v1alpha1
+kind: Store
+metadata:
+  name: test-store
+  namespace: default
+spec:
+  engine: woocommerce
