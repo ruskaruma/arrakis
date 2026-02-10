@@ -7,6 +7,7 @@ kc.loadFromDefault();
 
 export const coreApi = kc.makeApiClient(k8s.CoreV1Api);
 export const customApi = kc.makeApiClient(k8s.CustomObjectsApi);
+export const networkingApi = kc.makeApiClient(k8s.NetworkingV1Api);
 export const watcher = new k8s.Watch(kc);
 
 const MERGE_PATCH: k8s.ConfigurationOptions = {
@@ -72,6 +73,97 @@ export async function applyResourceQuota(namespace: string): Promise<void> {
             'limits.memory': '3Gi',
             'persistentvolumeclaims': '5',
           },
+        },
+      },
+    });
+  } catch (err: any) {
+    if (err?.code === 409) return;
+    throw err;
+  }
+}
+
+//NetworkPolicy
+
+export async function applyNetworkPolicies(namespace: string): Promise<void> {
+  const policies: Array<{ name: string; spec: k8s.V1NetworkPolicySpec }> = [
+    {
+      name: 'default-deny-ingress',
+      spec: { podSelector: {}, policyTypes: ['Ingress'] },
+    },
+    {
+      name: 'allow-traefik-ingress',
+      spec: {
+        podSelector: {},
+        policyTypes: ['Ingress'],
+        ingress: [{
+          _from: [{
+            namespaceSelector: { matchLabels: { 'kubernetes.io/metadata.name': 'kube-system' } },
+            podSelector: { matchLabels: { 'app.kubernetes.io/name': 'traefik' } },
+          }],
+        }],
+      },
+    },
+    {
+      name: 'allow-operator-ingress',
+      spec: {
+        podSelector: {},
+        policyTypes: ['Ingress'],
+        ingress: [{
+          _from: [{
+            namespaceSelector: { matchLabels: { 'kubernetes.io/metadata.name': 'default' } },
+          }],
+        }],
+      },
+    },
+    {
+      name: 'mariadb-restrict',
+      spec: {
+        podSelector: { matchLabels: { 'app.kubernetes.io/name': 'mariadb' } },
+        policyTypes: ['Ingress'],
+        ingress: [{
+          _from: [{ podSelector: { matchLabels: { 'app.kubernetes.io/name': 'wordpress' } } }],
+          ports: [{ protocol: 'TCP', port: 3306 }],
+        }],
+      },
+    },
+  ];
+
+  for (const policy of policies) {
+    try {
+      await networkingApi.createNamespacedNetworkPolicy({
+        namespace,
+        body: {
+          metadata: { name: policy.name, namespace },
+          spec: policy.spec,
+        },
+      });
+    } catch (err: any) {
+      if (err?.code === 409) continue;
+      throw err;
+    }
+  }
+}
+
+//LimitRange
+
+export async function applyLimitRange(namespace: string): Promise<void> {
+  try {
+    await coreApi.createNamespacedLimitRange({
+      namespace,
+      body: {
+        metadata: { name: 'store-limits', namespace },
+        spec: {
+          limits: [
+            {
+              type: 'Container',
+              _default: { cpu: '500m', memory: '512Mi' },
+              defaultRequest: { cpu: '100m', memory: '128Mi' },
+            },
+            {
+              type: 'PersistentVolumeClaim',
+              max: { storage: '5Gi' },
+            },
+          ],
         },
       },
     });

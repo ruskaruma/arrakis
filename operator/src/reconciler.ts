@@ -2,6 +2,7 @@ import * as path from 'path';
 import { Store, storeNamespace } from './types';
 import {
   namespaceExists, createNamespace, deleteNamespace, applyResourceQuota,
+  applyNetworkPolicies, applyLimitRange,
   updateStoreStatus, allPodsReady, getPodsReady,
   hasFinalizer, addFinalizer, removeFinalizer,
 } from './k8s-helpers';
@@ -61,7 +62,9 @@ export async function reconcile(store: Store): Promise<void> {
       });
       await createNamespace(ns, storeId);
       await applyResourceQuota(ns);
-      log.info('reconcile.ns', 'Namespace and quota created', { storeId, namespace: ns });
+      await applyNetworkPolicies(ns);
+      await applyLimitRange(ns);
+      log.info('reconcile.ns', 'Namespace, quota, network policies, and limits created', { storeId, namespace: ns });
     }
 
     // ── Helm Install ────────────────────────────────────────────────────────
