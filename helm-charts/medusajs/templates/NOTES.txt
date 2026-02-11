@@ -1,0 +1,13 @@
+MedusaJS store deployed by Arrakis.
+
+This is a skeleton chart demonstrating the engine abstraction pattern.
+The Arrakis operator dispatches to engine-specific Helm charts based on
+spec.engine in the Store CRD.
+
+Components:
+  - MedusaJS server (port 9000)
+  - PostgreSQL (Bitnami subchart)
+  - Redis (Bitnami subchart)
+
+Access:
+  {{ .Values.ingress.hostname }}

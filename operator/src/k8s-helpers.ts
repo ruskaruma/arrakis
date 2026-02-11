@@ -22,8 +22,6 @@ const MERGE_PATCH: k8s.ConfigurationOptions = {
   }],
 };
 
-// ─── Namespace ──────────────────────────────────────────────────────────────
-
 export async function namespaceExists(name: string): Promise<boolean> {
   try {
     await coreApi.readNamespace({ name });
@@ -57,8 +55,6 @@ export async function deleteNamespace(name: string): Promise<void> {
   }
 }
 
-// ─── ResourceQuota ──────────────────────────────────────────────────────────
-
 export async function applyResourceQuota(namespace: string): Promise<void> {
   try {
     await coreApi.createNamespacedResourceQuota({
@@ -81,8 +77,6 @@ export async function applyResourceQuota(namespace: string): Promise<void> {
     throw err;
   }
 }
-
-//NetworkPolicy
 
 export async function applyNetworkPolicies(namespace: string): Promise<void> {
   const policies: Array<{ name: string; spec: k8s.V1NetworkPolicySpec }> = [
@@ -144,8 +138,6 @@ export async function applyNetworkPolicies(namespace: string): Promise<void> {
   }
 }
 
-//LimitRange
-
 export async function applyLimitRange(namespace: string): Promise<void> {
   try {
     await coreApi.createNamespacedLimitRange({
@@ -173,8 +165,6 @@ export async function applyLimitRange(namespace: string): Promise<void> {
   }
 }
 
-// ─── Store Status ───────────────────────────────────────────────────────────
-
 export async function updateStoreStatus(
   storeId: string,
   status: Partial<NonNullable<Store['status']>>
@@ -188,8 +178,6 @@ export async function updateStoreStatus(
     body: { status },
   }, MERGE_PATCH);
 }
-
-// ─── Finalizers ─────────────────────────────────────────────────────────────
 
 export function hasFinalizer(store: Store): boolean {
   return (store.metadata.finalizers || []).includes(FINALIZER);
@@ -218,8 +206,6 @@ export async function removeFinalizer(store: Store): Promise<void> {
     body: { metadata: { finalizers } },
   }, MERGE_PATCH);
 }
-
-// ─── Pod Readiness ──────────────────────────────────────────────────────────
 
 export async function getPodsReady(namespace: string): Promise<{ ready: number; total: number }> {
   const res = await coreApi.listNamespacedPod({ namespace });

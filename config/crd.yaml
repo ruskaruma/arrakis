@@ -74,3 +74,7 @@ spec:
                   type: string
                   format: date-time
                   description: Timestamp when the store became ready.
+                observedGeneration:
+                  type: integer
+                  format: int64
+                  description: The generation of the spec last reconciled by the operator.

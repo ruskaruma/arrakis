@@ -1,0 +1,94 @@
+# Production values for k3s VPS deployment
+# Differences from values-local.yaml are commented inline
+
+wordpress:
+  # Production: 2 replicas for high availability (local: 1 implicit)
+  replicaCount: 2
+
+  service:
+    type: ClusterIP
+
+  ingress:
+    enabled: true
+    # Production: nginx ingress controller (local: traefik bundled with k3d)
+    ingressClassName: nginx
+    # Production: real domain, operator overrides per-store as {storeId}.stores.example.com
+    # Local uses nip.io wildcard DNS ({storeId}.127.0.0.1.nip.io)
+    hostname: "store.stores.example.com"
+    # Production: TLS via cert-manager (local: plain HTTP)
+    tls: true
+    annotations:
+      cert-manager.io/cluster-issuer: "letsencrypt-prod"
+      nginx.ingress.kubernetes.io/ssl-redirect: "true"
+
+  persistence:
+    # Production: Longhorn distributed storage for durability (local: local-path)
+    storageClass: longhorn
+    # Production: 10Gi for media uploads (local: 1Gi)
+    size: 10Gi
+
+  # Production: higher resource allocation for real traffic (local: 50m/256Mi req, 500m/512Mi limit)
+  resources:
+    requests:
+      cpu: 250m
+      memory: 256Mi
+    limits:
+      cpu: 1000m
+      memory: 1Gi
+
+  mariadb:
+    primary:
+      persistence:
+        # Production: Longhorn for replicated database storage (local: local-path)
+        storageClass: longhorn
+        # Production: 10Gi for database growth (local: 1Gi)
+        size: 10Gi
+      resources:
+        # Production: higher allocation for database workload (local: 50m/256Mi req, 500m/512Mi limit)
+        requests:
+          cpu: 250m
+          memory: 256Mi
+        limits:
+          cpu: 1000m
+          memory: 1Gi
+
+  # Production: pull WordPress credentials from Kubernetes Secrets managed by external-secrets-operator
+  # Local: uses Helm-generated defaults
+  # To use: create a Secret named {releaseName}-wordpress-credentials in the store namespace
+  # with keys: wordpress-password, mariadb-password, mariadb-root-password
+  existingSecret: ""
+
+  # Production: container security hardening
+  containerSecurityContext:
+    runAsNonRoot: true
+    allowPrivilegeEscalation: false
+    readOnlyRootFilesystem: false
+    capabilities:
+      drop:
+        - ALL
+
+  # Production: pod disruption budget for HA (ensures at least 1 pod during rolling updates)
+  podDisruptionBudget:
+    create: true
+    minAvailable: 1
+
+  # Production: anti-affinity to spread replicas across nodes
+  affinity:
+    podAntiAffinity:
+      preferredDuringSchedulingIgnoredDuringExecution:
+        - weight: 100
+          podAffinityTerm:
+            labelSelector:
+              matchLabels:
+                app.kubernetes.io/name: wordpress
+            topologyKey: kubernetes.io/hostname
+
+  # Production: liveness/readiness probes with tuned thresholds
+  livenessProbe:
+    initialDelaySeconds: 120
+    periodSeconds: 10
+    failureThreshold: 6
+  readinessProbe:
+    initialDelaySeconds: 30
+    periodSeconds: 5
+    failureThreshold: 3

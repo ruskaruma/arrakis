@@ -4,7 +4,7 @@ import { log } from './logger';
 
 const execFileAsync = promisify(execFile);
 
-const CMD_TIMEOUT_MS = 2 * 60 * 1000; // 2 minutes per command
+const CMD_TIMEOUT_MS = 2 * 60 * 1000;
 
 async function kubectlExec(storeId: string, namespace: string, command: string[]): Promise<string> {
   const { stdout, stderr } = await execFileAsync('kubectl', [
@@ -22,7 +22,6 @@ async function kubectlExec(storeId: string, namespace: string, command: string[]
 export async function verifyStore(storeId: string, namespace: string): Promise<boolean> {
   log.info('verify.start', 'Starting store verification', { storeId, namespace });
 
-  // 1. HTTP health check
   try {
     const httpCode = await kubectlExec(storeId, namespace, [
       'curl', '-s', '-o', '/dev/null', '-w', '%{http_code}', 'http://localhost:8080/',
@@ -37,7 +36,6 @@ export async function verifyStore(storeId: string, namespace: string): Promise<b
     return false;
   }
 
-  // 2. Product count check
   try {
     const countStr = await kubectlExec(storeId, namespace, [
       'wp', 'wc', 'product', 'list', '--format=count', '--user=user', '--allow-root',

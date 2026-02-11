@@ -37,6 +37,10 @@ export async function createStore(engine: string) {
   });
 
   const store = result as any;
+  return formatStore(store);
+}
+
+function formatStore(store: any) {
   return {
     id: store.metadata.name,
     engine: store.spec.engine,
@@ -44,10 +48,10 @@ export async function createStore(engine: string) {
     url: store.status?.url || null,
     message: store.status?.message || null,
     createdAt: store.metadata.creationTimestamp,
+    startedAt: store.status?.startedAt || null,
+    readyAt: store.status?.readyAt || null,
   };
 }
-
-// ─── List Stores ───────────────────────────────────────────────────────────
 
 export async function listStores() {
   const result = await customApi.listNamespacedCustomObject({
@@ -58,17 +62,8 @@ export async function listStores() {
   });
 
   const items = (result as any).items || [];
-  return items.map((store: any) => ({
-    id: store.metadata.name,
-    engine: store.spec.engine,
-    phase: store.status?.phase || 'Pending',
-    url: store.status?.url || null,
-    message: store.status?.message || null,
-    createdAt: store.metadata.creationTimestamp,
-  }));
+  return items.map(formatStore);
 }
-
-// ─── Get Store ─────────────────────────────────────────────────────────────
 
 export async function getStore(id: string) {
   try {
@@ -80,15 +75,7 @@ export async function getStore(id: string) {
       name: id,
     });
 
-    const store = result as any;
-    return {
-      id: store.metadata.name,
-      engine: store.spec.engine,
-      phase: store.status?.phase || 'Pending',
-      url: store.status?.url || null,
-      message: store.status?.message || null,
-      createdAt: store.metadata.creationTimestamp,
-    };
+    return formatStore(result);
   } catch (err: any) {
     if (err?.code === 404) return null;
     throw err;

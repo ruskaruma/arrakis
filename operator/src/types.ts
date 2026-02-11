@@ -19,6 +19,7 @@ export interface StoreStatus {
   message?: string;
   startedAt?: string;
   readyAt?: string;
+  observedGeneration?: number;
 }
 
 export interface Store {
@@ -31,6 +32,7 @@ export interface Store {
     deletionTimestamp?: string;
     finalizers?: string[];
     resourceVersion?: string;
+    generation?: number;
     uid?: string;
   };
   spec: StoreSpec;

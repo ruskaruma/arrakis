@@ -2,6 +2,11 @@ import { useState, useEffect, useRef } from 'react';
 import type { StoreEvent } from '../api.ts';
 import { fetchAllEvents } from '../api.ts';
 
+function formatTime(dateStr: string): string {
+  const d = new Date(dateStr);
+  return d.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false });
+}
+
 function timeAgo(dateStr: string): string {
   const seconds = Math.floor((Date.now() - new Date(dateStr).getTime()) / 1000);
   if (seconds < 60) return 'just now';
@@ -47,21 +52,21 @@ export default function ActivityLog() {
   const warningCount = events.filter(e => e.type === 'Warning').length;
 
   return (
-    <div className="bg-white rounded-xl shadow-sm border border-gray-200">
+    <div className="bg-white rounded-xl border border-gray-200">
       <button
         onClick={() => setExpanded(!expanded)}
-        className="w-full flex items-center justify-between px-5 py-4 text-left hover:bg-gray-50 transition-colors rounded-xl"
+        className="w-full flex items-center justify-between px-6 py-4 text-left hover:bg-gray-50/50 transition-colors rounded-xl"
       >
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2.5">
           <svg
-            className={`w-4 h-4 text-gray-400 transition-transform duration-200 ${expanded ? 'rotate-90' : ''}`}
-            fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}
+            className={`w-3.5 h-3.5 text-gray-400 transition-transform duration-200 ${expanded ? 'rotate-90' : ''}`}
+            fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}
           >
             <path strokeLinecap="round" strokeLinejoin="round" d="M8.25 4.5l7.5 7.5-7.5 7.5" />
           </svg>
-          <span className="text-lg font-semibold text-gray-900">Activity Log</span>
+          <span className="text-sm font-semibold text-gray-900">Activity Log</span>
           {!expanded && warningCount > 0 && (
-            <span className="px-2 py-0.5 text-[10px] font-semibold bg-red-100 text-red-700 rounded-full">
+            <span className="px-1.5 py-0.5 text-[10px] font-semibold bg-red-100 text-red-700 rounded-full">
               {warningCount}
             </span>
           )}
@@ -87,28 +92,25 @@ export default function ActivityLog() {
               {events.map((event, i) => (
                 <div
                   key={`${event.storeId}-${event.reason}-${event.timestamp}-${i}`}
-                  className={`flex items-start gap-3 px-5 py-3 ${
-                    i % 2 === 0 ? 'bg-white' : 'bg-gray-50/50'
-                  } ${event.type === 'Warning' ? 'bg-red-50' : ''}`}
+                  className={`flex items-start gap-3 px-6 py-3 ${
+                    event.type === 'Warning' ? 'bg-red-50/50' : ''
+                  }`}
                 >
+                  <span
+                    className={`mt-1.5 w-1.5 h-1.5 rounded-full shrink-0 ${
+                      event.type === 'Warning' ? 'bg-red-500' : 'bg-emerald-500'
+                    }`}
+                  />
                   {event.storeId && (
-                    <span className="shrink-0 mt-0.5 px-1.5 py-0.5 text-[10px] font-mono font-semibold bg-slate-100 text-slate-600 rounded">
+                    <span className="shrink-0 mt-0.5 px-1.5 py-0.5 text-[10px] font-mono font-medium bg-gray-100 text-gray-600 rounded">
                       {event.storeId}
                     </span>
                   )}
-                  <span
-                    className={`mt-1.5 w-2 h-2 rounded-full shrink-0 ${
-                      event.type === 'Warning' ? 'bg-red-500' : 'bg-green-500'
-                    }`}
-                  />
                   <div className="min-w-0 flex-1">
-                    <span className="text-xs font-semibold text-gray-800">{event.reason}</span>
+                    <span className="text-xs font-medium text-gray-800">{event.reason}</span>
                     <span className="text-xs text-gray-500 ml-1.5">{event.message}</span>
-                    {event.component && (
-                      <span className="text-[10px] text-gray-400 ml-1.5">{event.component}</span>
-                    )}
                   </div>
-                  <span className="text-[10px] text-gray-400 whitespace-nowrap shrink-0 mt-0.5">
+                  <span className="text-[10px] font-mono text-gray-400 whitespace-nowrap shrink-0 mt-0.5" title={formatTime(event.timestamp)}>
                     {timeAgo(event.timestamp)}
                   </span>
                 </div>

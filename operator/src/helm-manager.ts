@@ -6,18 +6,31 @@ export class HelmManager {
 
   async install(releaseName: string, namespace: string, sets: Record<string, string> = {}): Promise<void> {
     const args = [
-      'install', releaseName,
+      'upgrade', releaseName,
       this.chartPath,
+      '--install',
       '--namespace', namespace,
       '--values', this.valuesFile,
       '--timeout', '10m',
+      '--wait',
     ];
 
     for (const [key, value] of Object.entries(sets)) {
       args.push('--set', `${key}=${value}`);
     }
 
-    return this.run('install', args, releaseName);
+    return this.run('upgrade', args, releaseName);
+  }
+
+  async rollback(releaseName: string, namespace: string, revision?: number): Promise<void> {
+    const args = [
+      'rollback', releaseName,
+      ...(revision !== undefined ? [String(revision)] : []),
+      '--namespace', namespace,
+      '--timeout', '5m',
+    ];
+
+    return this.run('rollback', args, releaseName);
   }
 
   async uninstall(releaseName: string, namespace: string): Promise<void> {

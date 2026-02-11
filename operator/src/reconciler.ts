@@ -10,14 +10,13 @@ import { HelmManager } from './helm-manager';
 import { setupWooCommerce } from './woocommerce-setup';
 import { verifyStore } from './store-verifier';
 import { log } from './logger';
+import { reconcileDuration, reconcileErrors, provisionDuration } from './metrics';
 
 const PROVISION_TIMEOUT_MS = 10 * 60 * 1_000;
-
 const CHART_PATH = path.resolve(__dirname, '../../helm-charts/woocommerce');
 const VALUES_FILE = path.resolve(CHART_PATH, 'values-local.yaml');
 
 const helm = new HelmManager(CHART_PATH, VALUES_FILE);
-
 const activeReconciles = new Set<string>();
 
 export async function reconcile(store: Store): Promise<void> {
@@ -26,20 +25,11 @@ export async function reconcile(store: Store): Promise<void> {
 
   if (activeReconciles.has(storeId)) return;
   activeReconciles.add(storeId);
+  const reconcileStart = Date.now();
 
   try {
     if (store.metadata.deletionTimestamp) {
-      await updateStoreStatus(storeId, { phase: 'Deleting', message: 'Tearing down store' });
-      log.info('reconcile.delete', 'Deleting store', { storeId });
-
-      await helm.uninstall(storeId, ns);
-      log.info('reconcile.delete.helm', 'Helm release uninstalled', { storeId });
-
-      await deleteNamespace(ns);
-      log.info('reconcile.delete.ns', 'Namespace deleted', { storeId, namespace: ns });
-
-      await removeFinalizer(store);
-      log.info('reconcile.delete.done', 'Finalizer removed, deletion complete', { storeId });
+      await handleDeletion(storeId, ns, store);
       return;
     }
 
@@ -50,130 +40,45 @@ export async function reconcile(store: Store): Promise<void> {
     }
 
     const phase = store.status?.phase;
+    const generation = store.metadata.generation;
+    const observed = store.status?.observedGeneration;
+
+    if (phase === 'Ready' && generation !== undefined && observed === generation) return;
     if (phase === 'Ready' || phase === 'Failed') return;
 
-    //Provisioning timeout
-    if ((phase === 'Provisioning' || phase === 'Configuring') && store.status?.startedAt) {
-      const elapsed = Date.now() - new Date(store.status.startedAt).getTime();
-      if (elapsed > PROVISION_TIMEOUT_MS) {
-        await updateStoreStatus(storeId, {
-          phase: 'Failed',
-          message: 'Provisioning timed out after 10 minutes',
-        });
-        log.warn('reconcile.timeout', 'Provisioning timed out', { storeId, elapsed });
-        return;
-      }
-    }
-
-    // ── Namespace + ResourceQuota ────────────────────────────────────────────
-
-    if (!(await namespaceExists(ns))) {
+    if (isTimedOut(phase, store)) {
       await updateStoreStatus(storeId, {
-        phase: 'Provisioning',
-        message: 'Creating namespace and resource quota',
-        startedAt: new Date().toISOString(),
+        phase: 'Failed',
+        message: 'Provisioning timed out after 10 minutes',
       });
-      await createNamespace(ns, storeId);
-      await applyResourceQuota(ns);
-      await applyNetworkPolicies(ns);
-      await applyLimitRange(ns);
-      log.info('reconcile.ns', 'Namespace, quota, network policies, and limits created', { storeId, namespace: ns });
+      log.warn('reconcile.timeout', 'Provisioning timed out', { storeId });
+      return;
     }
 
-    // ── Helm Install ────────────────────────────────────────────────────────
-
-    if (!(await helm.releaseExists(storeId, ns))) {
-      await updateStoreStatus(storeId, {
-        phase: 'Provisioning',
-        message: 'Installing WordPress via Helm',
-      });
-
-      try {
-        await helm.install(storeId, ns, {
-          'wordpress.ingress.hostname': `${storeId}.127.0.0.1.nip.io`,
-        });
-        log.info('reconcile.helm', 'Helm release installed', { storeId, namespace: ns });
-      } catch (err: any) {
-        await updateStoreStatus(storeId, {
-          phase: 'Failed',
-          message: `Helm install failed: ${err.message}`,
-        });
-        return;
-      }
-    }
-
-    // ── Pod Readiness ───────────────────────────────────────────────────────
+    await ensureNamespace(storeId, ns);
+    await ensureHelmRelease(storeId, ns);
 
     if (!(await allPodsReady(ns))) {
       const pods = await getPodsReady(ns);
       await updateStoreStatus(storeId, {
         phase: 'Provisioning',
-        message: `Waiting for pods (${pods.ready}/${pods.total} ready)`,
+        message: `Waiting for pods (3/5) — ${pods.ready}/${pods.total} ready`,
       });
       return;
     }
 
     log.info('reconcile.pods', 'All pods ready', { storeId, namespace: ns });
 
-    // ── Configuring (WP-CLI setup) ───────────────────────────────────────
-    // Skip WP-CLI if we already completed it (phase is Verifying from a previous run)
-
     if (phase !== 'Verifying') {
-      await updateStoreStatus(storeId, {
-        phase: 'Configuring',
-        message: 'Running WooCommerce setup via WP-CLI',
-      });
-
-      try {
-        await setupWooCommerce(storeId, ns);
-      } catch (err: any) {
-        await updateStoreStatus(storeId, {
-          phase: 'Failed',
-          message: `WooCommerce setup failed: ${err.message}`,
-        });
-        return;
-      }
-
-      await updateStoreStatus(storeId, {
-        phase: 'Verifying',
-        message: 'Verifying store configuration',
-      });
+      await runWooCommerceSetup(storeId, ns);
     }
 
-    // ── Verifying ────────────────────────────────────────────────────────
-
-    let verified: boolean;
-    try {
-      verified = await verifyStore(storeId, ns);
-    } catch (err: any) {
-      await updateStoreStatus(storeId, {
-        phase: 'Failed',
-        message: `Verification error: ${err.message}`,
-      });
-      return;
-    }
-
-    if (!verified) {
-      await updateStoreStatus(storeId, {
-        phase: 'Failed',
-        message: 'Store verification failed (HTTP or product check)',
-      });
-      return;
-    }
-
-    // ── Ready ────────────────────────────────────────────────────────────
-
-    const storeUrl = `http://${storeId}.127.0.0.1.nip.io/shop`;
-    await updateStoreStatus(storeId, {
-      phase: 'Ready',
-      message: 'Store is running',
-      url: storeUrl,
-      readyAt: new Date().toISOString(),
-    });
-    log.info('reconcile.ready', `Store ready at ${storeUrl}`, { storeId });
+    await runVerification(storeId, ns);
+    await markReady(storeId, store);
 
   } catch (err: any) {
     log.error('reconcile.error', `Reconciliation error: ${err.message}`, { storeId });
+    reconcileErrors.inc({ phase: store.status?.phase || 'unknown' });
     try {
       await updateStoreStatus(storeId, {
         phase: 'Failed',
@@ -181,6 +86,126 @@ export async function reconcile(store: Store): Promise<void> {
       });
     } catch {}
   } finally {
+    reconcileDuration.observe((Date.now() - reconcileStart) / 1000);
     activeReconciles.delete(storeId);
+  }
+}
+
+async function handleDeletion(storeId: string, ns: string, store: Store): Promise<void> {
+  await updateStoreStatus(storeId, { phase: 'Deleting', message: 'Tearing down store' });
+  log.info('reconcile.delete', 'Deleting store', { storeId });
+
+  await helm.uninstall(storeId, ns);
+  await deleteNamespace(ns);
+  await removeFinalizer(store);
+  log.info('reconcile.delete.done', 'Store deleted', { storeId });
+}
+
+function isTimedOut(phase: string | undefined, store: Store): boolean {
+  if ((phase !== 'Provisioning' && phase !== 'Configuring') || !store.status?.startedAt) {
+    return false;
+  }
+  const elapsed = Date.now() - new Date(store.status.startedAt).getTime();
+  return elapsed > PROVISION_TIMEOUT_MS;
+}
+
+async function ensureNamespace(storeId: string, ns: string): Promise<void> {
+  if (await namespaceExists(ns)) return;
+
+  await updateStoreStatus(storeId, {
+    phase: 'Provisioning',
+    message: 'Creating namespace and isolation policies (1/5)',
+    startedAt: new Date().toISOString(),
+  });
+  await createNamespace(ns, storeId);
+  await applyResourceQuota(ns);
+  await applyNetworkPolicies(ns);
+  await applyLimitRange(ns);
+  log.info('reconcile.ns', 'Namespace created', { storeId, namespace: ns });
+}
+
+async function ensureHelmRelease(storeId: string, ns: string): Promise<void> {
+  if (await helm.releaseExists(storeId, ns)) return;
+
+  await updateStoreStatus(storeId, {
+    phase: 'Provisioning',
+    message: 'Installing WordPress via Helm (2/5)',
+  });
+
+  try {
+    await helm.install(storeId, ns, {
+      'wordpress.ingress.hostname': `${storeId}.127.0.0.1.nip.io`,
+    });
+    log.info('reconcile.helm', 'Helm release deployed', { storeId, namespace: ns });
+  } catch (err: any) {
+    await updateStoreStatus(storeId, {
+      phase: 'Failed',
+      message: `Helm install failed: ${err.message}`,
+    });
+    throw err;
+  }
+}
+
+async function runWooCommerceSetup(storeId: string, ns: string): Promise<void> {
+  await updateStoreStatus(storeId, {
+    phase: 'Configuring',
+    message: 'Configuring WooCommerce via WP-CLI (4/5)',
+  });
+
+  try {
+    await setupWooCommerce(storeId, ns);
+  } catch (err: any) {
+    await updateStoreStatus(storeId, {
+      phase: 'Failed',
+      message: `WooCommerce setup failed: ${err.message}`,
+    });
+    throw err;
+  }
+
+  await updateStoreStatus(storeId, {
+    phase: 'Verifying',
+    message: 'Verifying store health and products (5/5)',
+  });
+}
+
+async function runVerification(storeId: string, ns: string): Promise<void> {
+  let verified: boolean;
+  try {
+    verified = await verifyStore(storeId, ns);
+  } catch (err: any) {
+    await updateStoreStatus(storeId, {
+      phase: 'Failed',
+      message: `Verification error: ${err.message}`,
+    });
+    throw err;
+  }
+
+  if (!verified) {
+    await updateStoreStatus(storeId, {
+      phase: 'Failed',
+      message: 'Store verification failed (HTTP or product check)',
+    });
+    throw new Error('Verification failed');
+  }
+}
+
+async function markReady(storeId: string, store: Store): Promise<void> {
+  const storeUrl = `http://${storeId}.127.0.0.1.nip.io/shop`;
+  const readyAt = new Date().toISOString();
+
+  await updateStoreStatus(storeId, {
+    phase: 'Ready',
+    message: 'Store is running',
+    url: storeUrl,
+    readyAt,
+    observedGeneration: store.metadata.generation,
+  });
+
+  if (store.status?.startedAt) {
+    const durationSec = (Date.now() - new Date(store.status.startedAt).getTime()) / 1000;
+    provisionDuration.observe(durationSec);
+    log.info('reconcile.ready', `Store ready at ${storeUrl} (${durationSec.toFixed(1)}s)`, { storeId });
+  } else {
+    log.info('reconcile.ready', `Store ready at ${storeUrl}`, { storeId });
   }
 }

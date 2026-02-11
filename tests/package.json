@@ -3,7 +3,8 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "test": "ts-node integration/integration.test.ts"
+    "test": "ts-node integration/integration.test.ts",
+    "test:checkout": "ts-node e2e/checkout.test.ts"
   },
   "devDependencies": {
     "@types/node": "^20.0.0",

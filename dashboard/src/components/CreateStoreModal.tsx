@@ -25,9 +25,9 @@ export default function CreateStoreModal({ onClose, onCreated }: CreateStoreModa
   }
 
   return (
-    <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50 p-4" onClick={onClose}>
+    <div className="fixed inset-0 bg-black/40 backdrop-blur-sm flex items-center justify-center z-50 p-4" onClick={onClose}>
       <div
-        className="bg-white rounded-2xl shadow-2xl w-full max-w-md overflow-hidden"
+        className="bg-white rounded-2xl shadow-2xl w-full max-w-md overflow-hidden animate-fade-in"
         onClick={e => e.stopPropagation()}
       >
         <div className="px-6 pt-6 pb-4">
@@ -36,9 +36,9 @@ export default function CreateStoreModal({ onClose, onCreated }: CreateStoreModa
         </div>
 
         <div className="px-6 pb-5 space-y-3">
-          <div className="flex items-center gap-4 p-4 rounded-xl border-2 border-indigo-500 bg-indigo-50/50 cursor-default">
-            <div className="w-10 h-10 rounded-lg bg-indigo-100 flex items-center justify-center shrink-0">
-              <svg className="w-5 h-5 text-indigo-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+          <div className="flex items-center gap-4 p-4 rounded-xl border-2 border-primary-500 bg-primary-50/50 cursor-default">
+            <div className="w-10 h-10 rounded-lg bg-primary-100 flex items-center justify-center shrink-0">
+              <svg className="w-5 h-5 text-primary-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
                 <path strokeLinecap="round" strokeLinejoin="round" d="M2.25 3h1.386c.51 0 .955.343 1.087.835l.383 1.437M7.5 14.25a3 3 0 0 0-3 3h15.75m-12.75-3h11.218c1.121-2.3 2.1-4.684 2.924-7.138a60.114 60.114 0 0 0-16.536-1.84M7.5 14.25 5.106 5.272M6 20.25a.75.75 0 1 1-1.5 0 .75.75 0 0 1 1.5 0Zm12.75 0a.75.75 0 1 1-1.5 0 .75.75 0 0 1 1.5 0Z" />
               </svg>
             </div>
@@ -46,8 +46,8 @@ export default function CreateStoreModal({ onClose, onCreated }: CreateStoreModa
               <p className="text-sm font-semibold text-gray-900">WooCommerce</p>
               <p className="text-xs text-gray-500">WordPress + WooCommerce</p>
             </div>
-            <div className="w-5 h-5 rounded-full border-2 border-indigo-500 flex items-center justify-center shrink-0">
-              <div className="w-2.5 h-2.5 rounded-full bg-indigo-500" />
+            <div className="w-5 h-5 rounded-full border-2 border-primary-500 flex items-center justify-center shrink-0">
+              <div className="w-2.5 h-2.5 rounded-full bg-primary-500" />
             </div>
           </div>
 
@@ -62,7 +62,7 @@ export default function CreateStoreModal({ onClose, onCreated }: CreateStoreModa
               <p className="text-xs text-gray-400">Headless commerce platform</p>
             </div>
             <span className="shrink-0 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-gray-400 bg-gray-200 rounded-full">
-              Coming Soon
+              Q2 2026
             </span>
           </div>
         </div>
@@ -83,7 +83,7 @@ export default function CreateStoreModal({ onClose, onCreated }: CreateStoreModa
           <button
             onClick={handleCreate}
             disabled={loading}
-            className="px-5 py-2 text-sm font-medium text-white bg-indigo-600 rounded-lg hover:bg-indigo-700 disabled:opacity-50 transition-colors"
+            className="px-5 py-2 text-sm font-medium text-white bg-primary-600 rounded-lg hover:bg-primary-700 disabled:opacity-50 transition-colors"
           >
             {loading ? 'Creating...' : 'Create Store'}
           </button>

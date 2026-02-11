@@ -1,0 +1,40 @@
+replicaCount: 1
+
+image:
+  repository: medusajs/medusa
+  tag: "latest"
+  pullPolicy: IfNotPresent
+
+service:
+  type: ClusterIP
+  port: 9000
+
+ingress:
+  enabled: true
+  className: traefik
+  hostname: ""  # Set by operator: {storeId}.127.0.0.1.nip.io
+
+resources:
+  requests:
+    cpu: 100m
+    memory: 256Mi
+  limits:
+    cpu: 500m
+    memory: 512Mi
+
+postgresql:
+  enabled: true
+  auth:
+    database: medusa
+  primary:
+    persistence:
+      size: 1Gi
+      storageClass: local-path
+
+redis:
+  enabled: true
+  architecture: standalone
+  master:
+    persistence:
+      size: 512Mi
+      storageClass: local-path
