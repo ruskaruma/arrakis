@@ -26,6 +26,9 @@ spec:
             - name: metrics
               containerPort: 9091
               protocol: TCP
+            - name: webhook
+              containerPort: 9443
+              protocol: TCP
           resources:
             requests:
               cpu: 100m

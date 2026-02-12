@@ -6,6 +6,7 @@ import CreateStoreModal from './components/CreateStoreModal.tsx';
 import StoreCard from './components/StoreCard.tsx';
 import EmptyState from './components/EmptyState.tsx';
 import ActivityLog from './components/ActivityLog.tsx';
+import StatsBar from './components/StatsBar.tsx';
 import LoginPage from './components/LoginPage.tsx';
 
 const POLL_INTERVAL = 5000;
@@ -80,6 +81,8 @@ export default function App() {
             {error}
           </div>
         )}
+
+        {stores.length > 0 && <StatsBar stores={stores} />}
 
         {stores.length === 0 && !error ? (
           <EmptyState onCreate={() => setShowModal(true)} />

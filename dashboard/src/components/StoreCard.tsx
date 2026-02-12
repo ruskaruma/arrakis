@@ -85,20 +85,23 @@ function PhaseSteps({ currentPhase }: { currentPhase: string }) {
 
 export default function StoreCard({ store, onDeleted }: StoreCardProps) {
   const [deleting, setDeleting] = useState(false);
+  const [confirmDelete, setConfirmDelete] = useState(false);
   const [showEvents, setShowEvents] = useState(false);
   const [events, setEvents] = useState<StoreEvent[]>([]);
   const [eventsLoading, setEventsLoading] = useState(false);
   const [copied, setCopied] = useState(false);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   async function handleDelete() {
-    if (!confirm(`Delete store ${store.id}?`)) return;
     setDeleting(true);
+    setDeleteError(null);
     try {
       await deleteStore(store.id);
       onDeleted();
     } catch {
-      alert('Failed to delete store');
+      setDeleteError('Failed to delete');
+      setConfirmDelete(false);
     } finally {
       setDeleting(false);
     }
@@ -147,11 +150,21 @@ export default function StoreCard({ store, onDeleted }: StoreCardProps) {
       <div className="p-5">
         <div className="flex items-start justify-between mb-3">
           <div>
-            <p className="font-mono text-base font-semibold text-gray-900">{store.id}</p>
+            <p className="text-base font-semibold text-gray-900">
+              {store.storeName || store.id}
+            </p>
+            {store.storeName && (
+              <p className="font-mono text-xs text-gray-400 mt-0.5">{store.id}</p>
+            )}
             <div className="flex items-center gap-2 mt-1.5">
               <span className="px-1.5 py-0.5 text-[10px] font-medium bg-gray-100 text-gray-600 rounded">
                 {store.engine}
               </span>
+              {store.template && store.template !== 'general' && (
+                <span className="px-1.5 py-0.5 text-[10px] font-medium bg-primary-50 text-primary-600 rounded">
+                  {store.template}
+                </span>
+              )}
               <PhaseSteps currentPhase={store.phase} />
             </div>
           </div>
@@ -182,8 +195,12 @@ export default function StoreCard({ store, onDeleted }: StoreCardProps) {
           </p>
         )}
 
+        {deleteError && (
+          <p className="text-xs text-red-500 mb-3 animate-fade-in">{deleteError}</p>
+        )}
+
         {store.url && store.phase === 'Ready' && (
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-3">
             <a
               href={store.url}
               target="_blank"
@@ -194,6 +211,14 @@ export default function StoreCard({ store, onDeleted }: StoreCardProps) {
               <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                 <path strokeLinecap="round" strokeLinejoin="round" d="M13.5 4.5 21 12m0 0-7.5 7.5M21 12H3" />
               </svg>
+            </a>
+            <a
+              href={`${store.url}/wp-admin`}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-xs text-gray-400 hover:text-gray-600 transition-colors"
+            >
+              WP-Admin
             </a>
             <button
               onClick={handleCopyUrl}
@@ -224,13 +249,31 @@ export default function StoreCard({ store, onDeleted }: StoreCardProps) {
             >
               {showEvents ? 'Hide' : 'Events'}
             </button>
-            <button
-              onClick={handleDelete}
-              disabled={deleting}
-              className="text-xs text-gray-400 hover:text-red-600 disabled:opacity-50 transition-colors"
-            >
-              {deleting ? 'Deleting...' : 'Delete'}
-            </button>
+            {confirmDelete ? (
+              <span className="flex items-center gap-2 animate-fade-in">
+                <span className="text-xs text-red-600">Delete?</span>
+                <button
+                  onClick={handleDelete}
+                  disabled={deleting}
+                  className="text-xs font-medium text-red-600 hover:text-red-700 disabled:opacity-50 transition-colors"
+                >
+                  {deleting ? 'Deleting...' : 'Yes'}
+                </button>
+                <button
+                  onClick={() => setConfirmDelete(false)}
+                  className="text-xs text-gray-400 hover:text-gray-600 transition-colors"
+                >
+                  No
+                </button>
+              </span>
+            ) : (
+              <button
+                onClick={() => setConfirmDelete(true)}
+                className="text-xs text-gray-400 hover:text-red-600 transition-colors"
+              >
+                Delete
+              </button>
+            )}
           </div>
         </div>
       </div>

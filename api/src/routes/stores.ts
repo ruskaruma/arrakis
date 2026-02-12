@@ -1,5 +1,5 @@
 import { Router, Request, Response } from 'express';
-import { createStore, listStores, getStore, deleteStore, getStoreEvents, getAllEvents } from '../k8s/client';
+import { createStore, listStores, getStore, deleteStore, getStoreEvents, getAllEvents, getStoreStats } from '../k8s/client';
 
 const router = Router();
 
@@ -15,12 +15,24 @@ function auditLog(action: string, storeId: string, ip: string | undefined): void
   }));
 }
 
+const VALID_TEMPLATES = ['general', 'fashion', 'food', 'electronics'];
+
+function getOwner(req: Request): string {
+  const user = req.user as any;
+  return user?.id || 'anonymous';
+}
+
 // POST /api/stores
 router.post('/api/stores', async (req: Request, res: Response) => {
   try {
-    const { engine } = req.body;
+    const { engine, storeName, template } = req.body;
     if (!engine || !VALID_ENGINES.includes(engine)) {
       res.status(400).json({ error: `engine must be one of: ${VALID_ENGINES.join(', ')}` });
+      return;
+    }
+
+    if (template && !VALID_TEMPLATES.includes(template)) {
+      res.status(400).json({ error: `template must be one of: ${VALID_TEMPLATES.join(', ')}` });
       return;
     }
 
@@ -29,13 +41,19 @@ router.post('/api/stores', async (req: Request, res: Response) => {
       return;
     }
 
-    const existing = await listStores();
+    const owner = getOwner(req);
+    const existing = await listStores(owner);
     if (existing.length >= 10) {
-      res.status(429).json({ error: 'Maximum 10 stores allowed. Delete existing stores first.' });
+      res.status(429).json({ error: 'Maximum 10 stores per user. Delete existing stores first.' });
       return;
     }
 
-    const store = await createStore(engine);
+    const store = await createStore({
+      engine,
+      storeName: storeName || undefined,
+      template: template || 'general',
+      owner,
+    });
     auditLog('store.created', store.id, req.ip);
     res.status(201).json(store);
   } catch (err: any) {
@@ -45,9 +63,10 @@ router.post('/api/stores', async (req: Request, res: Response) => {
 });
 
 // GET /api/stores
-router.get('/api/stores', async (_req: Request, res: Response) => {
+router.get('/api/stores', async (req: Request, res: Response) => {
   try {
-    const stores = await listStores();
+    const owner = getOwner(req);
+    const stores = await listStores(owner);
     res.status(200).json(stores);
   } catch (err: any) {
     console.error('GET /api/stores error:', err.message);
@@ -82,6 +101,18 @@ router.delete('/api/stores/:id', async (req: Request, res: Response) => {
     res.status(204).send();
   } catch (err: any) {
     console.error(`DELETE /api/stores/${req.params.id} error:`, err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// GET /api/stats
+router.get('/api/stats', async (req: Request, res: Response) => {
+  try {
+    const owner = getOwner(req);
+    const stats = await getStoreStats(owner);
+    res.status(200).json(stats);
+  } catch (err: any) {
+    console.error('GET /api/stats error:', err.message);
     res.status(500).json({ error: err.message });
   }
 });

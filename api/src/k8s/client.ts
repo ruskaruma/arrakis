@@ -13,8 +13,20 @@ const coreApi = kc.makeApiClient(k8s.CoreV1Api);
 
 // ─── Create Store ──────────────────────────────────────────────────────────
 
-export async function createStore(engine: string) {
+interface CreateStoreOptions {
+  engine: string;
+  storeName?: string;
+  template?: string;
+  owner?: string;
+}
+
+export async function createStore(options: CreateStoreOptions) {
   const id = `s${crypto.randomBytes(4).toString('hex')}`;
+
+  const spec: Record<string, string> = { engine: options.engine };
+  if (options.storeName) spec.storeName = options.storeName;
+  if (options.template) spec.template = options.template;
+  if (options.owner) spec.owner = options.owner;
 
   const body = {
     apiVersion: `${CRD_GROUP}/${CRD_VERSION}`,
@@ -23,9 +35,7 @@ export async function createStore(engine: string) {
       name: id,
       namespace: 'default',
     },
-    spec: {
-      engine,
-    },
+    spec,
   };
 
   const result = await customApi.createNamespacedCustomObject({
@@ -44,6 +54,9 @@ function formatStore(store: any) {
   return {
     id: store.metadata.name,
     engine: store.spec.engine,
+    storeName: store.spec.storeName || null,
+    template: store.spec.template || 'general',
+    owner: store.spec.owner || null,
     phase: store.status?.phase || 'Pending',
     url: store.status?.url || null,
     message: store.status?.message || null,
@@ -53,7 +66,7 @@ function formatStore(store: any) {
   };
 }
 
-export async function listStores() {
+export async function listStores(owner?: string) {
   const result = await customApi.listNamespacedCustomObject({
     group: CRD_GROUP,
     version: CRD_VERSION,
@@ -61,7 +74,10 @@ export async function listStores() {
     plural: CRD_PLURAL,
   });
 
-  const items = (result as any).items || [];
+  let items = (result as any).items || [];
+  if (owner) {
+    items = items.filter((s: any) => s.spec.owner === owner);
+  }
   return items.map(formatStore);
 }
 
@@ -122,6 +138,27 @@ export async function getStoreEvents(id: string) {
     if (err?.code === 404) return [];
     throw err;
   }
+}
+
+export async function getStoreStats(owner?: string) {
+  const stores = await listStores(owner);
+  const byPhase: Record<string, number> = {};
+  let totalProvisionMs = 0;
+  let provisionedCount = 0;
+
+  for (const store of stores) {
+    byPhase[store.phase] = (byPhase[store.phase] || 0) + 1;
+    if (store.startedAt && store.readyAt) {
+      totalProvisionMs += new Date(store.readyAt).getTime() - new Date(store.startedAt).getTime();
+      provisionedCount++;
+    }
+  }
+
+  return {
+    total: stores.length,
+    byPhase,
+    avgProvisionMs: provisionedCount > 0 ? Math.round(totalProvisionMs / provisionedCount) : null,
+  };
 }
 
 export async function getAllEvents() {

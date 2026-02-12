@@ -19,12 +19,18 @@ spec:
       subresources:
         status: {}
       additionalPrinterColumns:
+        - name: Name
+          type: string
+          jsonPath: .spec.storeName
         - name: Engine
           type: string
           jsonPath: .spec.engine
         - name: Phase
           type: string
           jsonPath: .status.phase
+        - name: Owner
+          type: string
+          jsonPath: .spec.owner
         - name: URL
           type: string
           jsonPath: .status.url
@@ -46,6 +52,22 @@ spec:
                     - woocommerce
                     - medusajs
                   description: The e-commerce engine to provision.
+                storeName:
+                  type: string
+                  maxLength: 64
+                  description: Human-readable name for the store.
+                template:
+                  type: string
+                  enum:
+                    - general
+                    - fashion
+                    - food
+                    - electronics
+                  default: general
+                  description: Product template to seed on creation.
+                owner:
+                  type: string
+                  description: GitHub user ID of the store owner.
             status:
               type: object
               properties:

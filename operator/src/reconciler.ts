@@ -72,7 +72,7 @@ export async function reconcile(store: Store): Promise<void> {
     log.info('reconcile.pods', 'All pods ready', { storeId, namespace: ns });
 
     if (phase !== 'Verifying') {
-      await runWooCommerceSetup(storeId, ns);
+      await runWooCommerceSetup(storeId, ns, store.spec.template);
     }
 
     await runVerification(storeId, ns);
@@ -148,14 +148,14 @@ async function ensureHelmRelease(storeId: string, ns: string): Promise<void> {
   }
 }
 
-async function runWooCommerceSetup(storeId: string, ns: string): Promise<void> {
+async function runWooCommerceSetup(storeId: string, ns: string, template?: string): Promise<void> {
   await updateStoreStatus(storeId, {
     phase: 'Configuring',
     message: 'Configuring WooCommerce via WP-CLI (4/5)',
   });
 
   try {
-    await setupWooCommerce(storeId, ns);
+    await setupWooCommerce(storeId, ns, (template as any) || 'general');
   } catch (err: any) {
     await updateStoreStatus(storeId, {
       phase: 'Failed',

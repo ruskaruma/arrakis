@@ -3,6 +3,7 @@ import { customApi, watcher } from './k8s-helpers';
 import { reconcile } from './reconciler';
 import { log } from './logger';
 import { startMetricsServer, setWatchHealthy, storesGauge } from './metrics';
+import { startWebhookServer } from './webhook';
 
 const SYNC_INTERVAL_MS = 30_000;
 const INITIAL_BACKOFF_MS = 1_000;
@@ -106,6 +107,7 @@ async function main(): Promise<void> {
   log.info('operator.start', 'Arrakis operator starting');
 
   const metricsServer = startMetricsServer(9091);
+  const webhookServer = startWebhookServer(9443);
   await startWatch();
 
   syncTimer = setInterval(periodicSync, SYNC_INTERVAL_MS);
@@ -120,6 +122,7 @@ async function main(): Promise<void> {
       try { watchReq.destroy(); } catch {}
     }
     metricsServer.close();
+    webhookServer.close();
     process.exit(0);
   };
 

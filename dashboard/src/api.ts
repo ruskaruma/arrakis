@@ -25,6 +25,9 @@ export async function logout(): Promise<void> {
 export interface Store {
   id: string;
   engine: string;
+  storeName: string | null;
+  template: string;
+  owner: string | null;
   phase: string;
   url: string | null;
   message: string | null;
@@ -39,11 +42,17 @@ export async function fetchStores(): Promise<Store[]> {
   return res.json();
 }
 
-export async function createStore(engine: string): Promise<Store> {
+export interface CreateStoreOptions {
+  engine: string;
+  storeName?: string;
+  template?: string;
+}
+
+export async function createStore(options: CreateStoreOptions): Promise<Store> {
   const res = await fetch(`${API_BASE}/api/stores`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ engine }),
+    body: JSON.stringify(options),
     credentials: 'include',
   });
   if (!res.ok) {
@@ -72,6 +81,18 @@ export interface StoreEvent {
 export async function fetchStoreEvents(id: string): Promise<StoreEvent[]> {
   const res = await fetch(`${API_BASE}/api/stores/${id}/events`, { credentials: 'include' });
   if (!res.ok) throw new Error(`Failed to fetch events: ${res.status}`);
+  return res.json();
+}
+
+export interface StoreStats {
+  total: number;
+  byPhase: Record<string, number>;
+  avgProvisionMs: number | null;
+}
+
+export async function fetchStats(): Promise<StoreStats> {
+  const res = await fetch(`${API_BASE}/api/stats`, { credentials: 'include' });
+  if (!res.ok) throw new Error(`Failed to fetch stats: ${res.status}`);
   return res.json();
 }
 

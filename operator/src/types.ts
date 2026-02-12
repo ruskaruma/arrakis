@@ -1,4 +1,5 @@
 export type StoreEngine = 'woocommerce' | 'medusajs';
+export type StoreTemplate = 'general' | 'fashion' | 'food' | 'electronics';
 
 export type StorePhase =
   | 'Pending'
@@ -11,6 +12,9 @@ export type StorePhase =
 
 export interface StoreSpec {
   engine: StoreEngine;
+  storeName?: string;
+  template?: StoreTemplate;
+  owner?: string;
 }
 
 export interface StoreStatus {
