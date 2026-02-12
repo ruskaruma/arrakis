@@ -16,6 +16,8 @@ const PROVISION_TIMEOUT_MS = 10 * 60 * 1_000;
 const CHART_PATH = path.resolve(__dirname, '../../helm-charts/woocommerce');
 const VALUES_FILE = path.resolve(CHART_PATH, 'values-local.yaml');
 
+const STORE_BASE_DOMAIN = process.env.STORE_BASE_DOMAIN || '127.0.0.1.nip.io';
+
 const helm = new HelmManager(CHART_PATH, VALUES_FILE);
 const activeReconciles = new Set<string>();
 
@@ -134,7 +136,7 @@ async function ensureHelmRelease(storeId: string, ns: string): Promise<void> {
 
   try {
     await helm.install(storeId, ns, {
-      'wordpress.ingress.hostname': `${storeId}.127.0.0.1.nip.io`,
+      'wordpress.ingress.hostname': `${storeId}.${STORE_BASE_DOMAIN}`,
     });
     log.info('reconcile.helm', 'Helm release deployed', { storeId, namespace: ns });
   } catch (err: any) {
@@ -190,7 +192,7 @@ async function runVerification(storeId: string, ns: string): Promise<void> {
 }
 
 async function markReady(storeId: string, store: Store): Promise<void> {
-  const storeUrl = `http://${storeId}.127.0.0.1.nip.io/shop`;
+  const storeUrl = `http://${storeId}.${STORE_BASE_DOMAIN}/shop`;
   const readyAt = new Date().toISOString();
 
   await updateStoreStatus(storeId, {
