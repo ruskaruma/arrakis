@@ -15,8 +15,6 @@ graph LR
 
 Deployed on AWS EC2 (ap-southeast-2) with k3s, accessible at [`arrakis.ruskaruma.me`](http://arrakis.ruskaruma.me:3000).
 
-![Arrakis Dashboard — Live on AWS](./docs/dashboard-live.png)
-
 ## Features
 
 - **One-click store creation** — pick a template, get a live WooCommerce store
