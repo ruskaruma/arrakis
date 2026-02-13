@@ -7,6 +7,7 @@ import rateLimit from 'express-rate-limit';
 import { configureGitHub } from './auth/github';
 import { isAuthenticated } from './auth/middleware';
 import storesRouter from './routes/stores';
+import { spec as openapiSpec } from './openapi';
 
 const app = express();
 
@@ -16,12 +17,19 @@ app.use(cors({
 }));
 app.use(express.json());
 
+const isProduction = process.env.NODE_ENV === 'production';
+
+if (isProduction && !process.env.SESSION_SECRET) {
+  console.error('FATAL: SESSION_SECRET must be set in production');
+  process.exit(1);
+}
+
 app.use(session({
   secret: process.env.SESSION_SECRET || 'arrakis-dev-secret',
   resave: false,
   saveUninitialized: false,
   cookie: {
-    secure: false,
+    secure: isProduction,
     httpOnly: true,
     maxAge: 24 * 60 * 60 * 1000,
   },
@@ -31,7 +39,6 @@ app.use(passport.initialize());
 app.use(passport.session());
 configureGitHub();
 
-// Auth routes
 app.get('/auth/github', passport.authenticate('github', { scope: ['user:email'] }));
 
 app.get('/auth/github/callback',
@@ -63,7 +70,6 @@ app.get('/auth/failed', (_req, res) => {
   res.status(401).json({ error: 'Authentication failed' });
 });
 
-// Rate limit on store creation only
 const createStoreLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
   max: 10,
@@ -73,13 +79,25 @@ const createStoreLimiter = rateLimit({
 });
 app.post('/api/stores', createStoreLimiter);
 
-// Protect all /api routes
 app.use('/api', isAuthenticated);
-
-// Routes
 app.use(storesRouter);
 
-// Health check
+app.get('/api/docs/spec', (_req, res) => {
+  res.json(openapiSpec);
+});
+
+app.get('/api/docs', (_req, res) => {
+  res.setHeader('Content-Type', 'text/html');
+  res.send(`<!doctype html>
+<html><head><title>Arrakis API</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/swagger-ui-dist@5/swagger-ui.css">
+</head><body>
+<div id="swagger-ui"></div>
+<script src="https://cdn.jsdelivr.net/npm/swagger-ui-dist@5/swagger-ui-bundle.js"></script>
+<script>SwaggerUIBundle({ url: '/api/docs/spec', dom_id: '#swagger-ui' });</script>
+</body></html>`);
+});
+
 app.get('/health', (_req, res) => {
   res.json({ status: 'ok' });
 });

@@ -1,21 +1,10 @@
 import { useState, useEffect, useRef } from 'react';
 import type { StoreEvent } from '../api.ts';
 import { fetchAllEvents } from '../api.ts';
+import { timeAgo } from '../utils.ts';
 
 function formatTime(dateStr: string): string {
-  const d = new Date(dateStr);
-  return d.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false });
-}
-
-function timeAgo(dateStr: string): string {
-  const seconds = Math.floor((Date.now() - new Date(dateStr).getTime()) / 1000);
-  if (seconds < 60) return 'just now';
-  const minutes = Math.floor(seconds / 60);
-  if (minutes < 60) return `${minutes}m ago`;
-  const hours = Math.floor(minutes / 60);
-  if (hours < 24) return `${hours}h ago`;
-  const days = Math.floor(hours / 24);
-  return `${days}d ago`;
+  return new Date(dateStr).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false });
 }
 
 export default function ActivityLog() {
@@ -52,21 +41,21 @@ export default function ActivityLog() {
   const warningCount = events.filter(e => e.type === 'Warning').length;
 
   return (
-    <div className="bg-white rounded-xl border border-gray-200">
+    <div className="rounded-xl border border-[var(--border)] bg-[var(--bg-surface)]">
       <button
         onClick={() => setExpanded(!expanded)}
-        className="w-full flex items-center justify-between px-6 py-4 text-left hover:bg-gray-50/50 transition-colors rounded-xl"
+        className="w-full flex items-center justify-between px-6 py-4 text-left hover:bg-[var(--bg-hover)] transition-colors rounded-xl"
       >
         <div className="flex items-center gap-2.5">
           <svg
-            className={`w-3.5 h-3.5 text-gray-400 transition-transform duration-200 ${expanded ? 'rotate-90' : ''}`}
+            className={`w-3.5 h-3.5 text-[var(--text-muted)] transition-transform duration-200 ${expanded ? 'rotate-90' : ''}`}
             fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}
           >
             <path strokeLinecap="round" strokeLinejoin="round" d="M8.25 4.5l7.5 7.5-7.5 7.5" />
           </svg>
-          <span className="text-sm font-semibold text-gray-900">Activity Log</span>
+          <span className="text-sm font-semibold text-[var(--text-primary)]">Activity Log</span>
           {!expanded && warningCount > 0 && (
-            <span className="px-1.5 py-0.5 text-[10px] font-semibold bg-red-100 text-red-700 rounded-full">
+            <span className="px-1.5 py-0.5 text-[10px] font-semibold bg-red-500/15 text-red-400 rounded-full">
               {warningCount}
             </span>
           )}
@@ -74,7 +63,7 @@ export default function ActivityLog() {
         {expanded && (
           <span
             onClick={(e) => { e.stopPropagation(); setLoading(true); loadEvents(); }}
-            className="text-xs font-medium text-gray-400 hover:text-gray-600 transition-colors"
+            className="text-xs font-medium text-[var(--text-muted)] hover:text-[var(--text-body)] transition-colors"
           >
             Refresh
           </span>
@@ -82,18 +71,18 @@ export default function ActivityLog() {
       </button>
 
       {expanded && (
-        <div className="border-t border-gray-100">
+        <div className="border-t border-[var(--border)]">
           {loading && events.length === 0 ? (
-            <p className="text-sm text-gray-400 text-center py-8">Loading events...</p>
+            <p className="text-sm text-[var(--text-muted)] text-center py-8">Loading events...</p>
           ) : events.length === 0 ? (
-            <p className="text-sm text-gray-400 text-center py-8">No events across stores</p>
+            <p className="text-sm text-[var(--text-muted)] text-center py-8">No events across stores</p>
           ) : (
-            <div className="max-h-[400px] overflow-y-auto divide-y divide-gray-100">
+            <div className="max-h-[400px] overflow-y-auto divide-y divide-[var(--border-subtle)]">
               {events.map((event, i) => (
                 <div
                   key={`${event.storeId}-${event.reason}-${event.timestamp}-${i}`}
                   className={`flex items-start gap-3 px-6 py-3 ${
-                    event.type === 'Warning' ? 'bg-red-50/50' : ''
+                    event.type === 'Warning' ? 'bg-red-500/5' : ''
                   }`}
                 >
                   <span
@@ -102,15 +91,15 @@ export default function ActivityLog() {
                     }`}
                   />
                   {event.storeId && (
-                    <span className="shrink-0 mt-0.5 px-1.5 py-0.5 text-[10px] font-mono font-medium bg-gray-100 text-gray-600 rounded">
+                    <span className="shrink-0 mt-0.5 px-1.5 py-0.5 text-[10px] font-mono font-medium bg-[var(--bg-input)] text-[var(--text-muted)] rounded">
                       {event.storeId}
                     </span>
                   )}
                   <div className="min-w-0 flex-1">
-                    <span className="text-xs font-medium text-gray-800">{event.reason}</span>
-                    <span className="text-xs text-gray-500 ml-1.5">{event.message}</span>
+                    <span className="text-xs font-medium text-[var(--text-body)]">{event.reason}</span>
+                    <span className="text-xs text-[var(--text-muted)] ml-1.5">{event.message}</span>
                   </div>
-                  <span className="text-[10px] font-mono text-gray-400 whitespace-nowrap shrink-0 mt-0.5" title={formatTime(event.timestamp)}>
+                  <span className="text-[10px] font-mono text-[var(--text-dim)] whitespace-nowrap shrink-0 mt-0.5" title={formatTime(event.timestamp)}>
                     {timeAgo(event.timestamp)}
                   </span>
                 </div>

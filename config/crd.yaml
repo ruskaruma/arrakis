@@ -34,6 +34,10 @@ spec:
         - name: URL
           type: string
           jsonPath: .status.url
+        - name: Revision
+          type: integer
+          jsonPath: .status.helmRevision
+          priority: 1
         - name: Age
           type: date
           jsonPath: .metadata.creationTimestamp
@@ -63,11 +67,22 @@ spec:
                     - fashion
                     - food
                     - electronics
+                    - beauty
+                    - sports
+                    - books
                   default: general
                   description: Product template to seed on creation.
                 owner:
                   type: string
                   description: GitHub user ID of the store owner.
+                version:
+                  type: string
+                  maxLength: 32
+                  description: Desired version for helm upgrade.
+                helmValues:
+                  type: object
+                  x-kubernetes-preserve-unknown-fields: true
+                  description: Additional Helm values to set on upgrade.
             status:
               type: object
               properties:
@@ -81,6 +96,8 @@ spec:
                     - Ready
                     - Failed
                     - Deleting
+                    - Upgrading
+                    - RollingBack
                   description: Current lifecycle phase of the store.
                 url:
                   type: string
@@ -100,3 +117,16 @@ spec:
                   type: integer
                   format: int64
                   description: The generation of the spec last reconciled by the operator.
+                retryCount:
+                  type: integer
+                  description: Number of reconciliation retries before marking as Failed.
+                helmRevision:
+                  type: integer
+                  description: Current Helm release revision number.
+                lastUpgradedAt:
+                  type: string
+                  format: date-time
+                  description: Timestamp of the last successful upgrade.
+                rollbackRevision:
+                  type: integer
+                  description: Target revision for rollback. Reconciler clears on pickup.

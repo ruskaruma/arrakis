@@ -19,6 +19,12 @@ wordpress:
       cpu: 500m
       memory: 512Mi
 
+  containerSecurityContext:
+    runAsNonRoot: true
+    allowPrivilegeEscalation: false
+    capabilities:
+      drop: ["ALL"]
+
   mariadb:
     primary:
       persistence:

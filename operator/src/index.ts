@@ -2,15 +2,17 @@ import { Store, CRD_GROUP, CRD_VERSION, CRD_PLURAL } from './types';
 import { customApi, watcher } from './k8s-helpers';
 import { reconcile } from './reconciler';
 import { log } from './logger';
-import { startMetricsServer, setWatchHealthy, storesGauge } from './metrics';
+import { startHealthServer, setWatchHealthy } from './metrics';
 import { startWebhookServer } from './webhook';
+import { startLeaderElection, stopLeaderElection } from './leader-election';
 
 const SYNC_INTERVAL_MS = 30_000;
 const INITIAL_BACKOFF_MS = 1_000;
 const MAX_BACKOFF_MS = 60_000;
 const MAX_CONCURRENT_RECONCILES = 5;
+const MAX_RETRIES = 3;
 
-let watchReq: any = null;
+let watchReq: { destroy?: () => void; abort?: () => void } | null = null;
 let backoff = INITIAL_BACKOFF_MS;
 let syncTimer: NodeJS.Timeout | null = null;
 
@@ -22,8 +24,8 @@ async function startWatch(): Promise<void> {
     watchReq = await watcher.watch(
       watchPath,
       {},
-      (type: string, obj: any) => {
-        const store = obj as Store;
+      (type: string, obj: Record<string, unknown>) => {
+        const store = obj as unknown as Store;
         const id = store.metadata.name;
         if (!id) return;
 
@@ -73,17 +75,14 @@ async function periodicSync(): Promise<void> {
       plural: CRD_PLURAL,
     });
 
-    const stores = ((res as any).items || []) as Store[];
-
-    storesGauge.reset();
-    for (const s of stores) {
-      storesGauge.inc({ phase: s.status?.phase || 'Pending' });
-    }
+    const stores = ((res as { items?: Store[] }).items || []) as Store[];
 
     const pending = stores.filter(store => {
+      if (store.metadata.deletionTimestamp) return true;
       const phase = store.status?.phase;
-      const terminal = phase === 'Ready' || phase === 'Failed';
-      return !terminal || !!store.metadata.deletionTimestamp;
+      if (phase === 'Ready') return false;
+      if (phase === 'Failed' && (store.status?.retryCount || 0) >= MAX_RETRIES) return false;
+      return true;
     });
 
     for (let i = 0; i < pending.length; i += MAX_CONCURRENT_RECONCILES) {
@@ -103,24 +102,42 @@ async function periodicSync(): Promise<void> {
   }
 }
 
+function startReconcileLoop(): void {
+  log.info('leader.active', 'Starting watch and sync as leader');
+  startWatch();
+  syncTimer = setInterval(periodicSync, SYNC_INTERVAL_MS);
+  periodicSync();
+}
+
+function stopReconcileLoop(): void {
+  log.warn('leader.standby', 'Stopping watch and sync (no longer leader)');
+  if (syncTimer) { clearInterval(syncTimer); syncTimer = null; }
+  if (watchReq) {
+    try { (watchReq.destroy || watchReq.abort)?.(); } catch { /* watch stream already closed */ }
+    watchReq = null;
+  }
+  setWatchHealthy(false);
+}
+
 async function main(): Promise<void> {
   log.info('operator.start', 'Arrakis operator starting');
 
-  const metricsServer = startMetricsServer(9091);
+  const metricsServer = startHealthServer(9091);
   const webhookServer = startWebhookServer(9443);
-  await startWatch();
 
-  syncTimer = setInterval(periodicSync, SYNC_INTERVAL_MS);
-  await periodicSync();
+  if (process.env.SKIP_LEADER_ELECTION === '1' || process.env.SKIP_LEADER_ELECTION === 'true') {
+    log.info('leader.skip', 'SKIP_LEADER_ELECTION set, starting reconcile loop directly');
+    startReconcileLoop();
+  } else {
+    await startLeaderElection(startReconcileLoop, stopReconcileLoop);
+  }
 
   log.info('operator.ready', 'Operator running');
 
   const shutdown = (signal: string) => {
     log.info('operator.shutdown', `${signal} received, shutting down`);
-    if (syncTimer) clearInterval(syncTimer);
-    if (watchReq) {
-      try { watchReq.destroy(); } catch {}
-    }
+    stopLeaderElection();
+    stopReconcileLoop();
     metricsServer.close();
     webhookServer.close();
     process.exit(0);

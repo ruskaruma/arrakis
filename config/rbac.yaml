@@ -46,7 +46,15 @@ rules:
   # Events
   - apiGroups: [""]
     resources: ["events"]
-    verbs: ["list"]
+    verbs: ["list", "create"]
+  # Secrets (store credentials, WC API keys)
+  - apiGroups: [""]
+    resources: ["secrets"]
+    verbs: ["create", "get"]
+  # Leases (leader election)
+  - apiGroups: ["coordination.k8s.io"]
+    resources: ["leases"]
+    verbs: ["get", "create", "update"]
   # NetworkPolicies
   - apiGroups: ["networking.k8s.io"]
     resources: ["networkpolicies"]

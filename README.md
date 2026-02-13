@@ -2,7 +2,7 @@
 
 Multi-tenant store provisioning on Kubernetes. Create fully-configured WooCommerce stores with a single API call. Each store gets its own namespace with resource isolation, networking policies, and automated cleanup.
 
-**Features:** GitHub OAuth, per-user store ownership, store naming, 4 product templates (fashion/food/electronics/general), HPOS, validating admission webhook, Prometheus metrics, live provisioning timer, MedusaJS architecture (Q2 2026).
+**Features:** GitHub OAuth, per-user store ownership, store naming, 7 product templates (general/fashion/food/electronics/beauty/sports/books), light/dark theme, HPOS, validating admission webhook, CRD-driven upgrades & Helm rollback with revision history, live provisioning timer, MedusaJS engine planned (Q2 2026).
 
 ## Prerequisites
 
@@ -164,7 +164,7 @@ Response:
 }
 ```
 
-Templates: `general` (default), `fashion`, `food`, `electronics`. Each seeds different themed products.
+Templates: `general` (default), `fashion`, `food`, `electronics`, `beauty`, `sports`, `books`. Each seeds different themed products.
 
 The store progresses through: Pending -> Provisioning -> Configuring -> Verifying -> Ready. This takes 1-3 minutes depending on cluster resources.
 
@@ -247,12 +247,24 @@ curl http://localhost:8080/api/stores/s1a2b3c4d/events
 | POST | /api/stores | Create a store (rate-limited: 10/15min, max 10 per user) |
 | GET | /api/stores | List authenticated user's stores |
 | GET | /api/stores/:id | Get a single store |
-| DELETE | /api/stores/:id | Delete a store |
+| DELETE | /api/stores/:id | Delete a store (finalizer-based cleanup) |
+| POST | /api/stores/:id/retry | Retry a Failed store (resets to Pending) |
+| POST | /api/stores/:id/upgrade | Upgrade a store (version, helmValues) |
+| POST | /api/stores/:id/rollback | Rollback to a previous Helm revision |
+| GET | /api/stores/:id/revisions | Helm revision history |
+| GET | /api/stores/:id/credentials | WP-Admin username/password |
+| GET | /api/stores/:id/metrics | Pod resource usage and storage |
+| GET | /api/stores/:id/products | List WooCommerce products |
+| POST | /api/stores/:id/products | Create a product (name, regular_price, images) |
+| DELETE | /api/stores/:id/products/:productId | Delete a product |
 | GET | /api/stores/:id/events | Kubernetes events for a store's namespace |
-| GET | /api/events | All events across stores |
+| GET | /api/events | Events across authenticated user's stores |
+| GET | /api/stats | Store count by phase, avg provision time |
+| GET | /api/audit | Audit log (last 1000 actions with IP/timestamp) |
+| GET | /api/docs | OpenAPI/Swagger documentation |
 | GET | /health | API health check |
 
-All `/api/*` routes require authentication (GitHub OAuth session or `SKIP_AUTH=true`). MedusaJS engine returns 501 (Q2 2026 roadmap).
+All `/api/*` routes require authentication (GitHub OAuth session or `SKIP_AUTH=true`). All store endpoints enforce per-user ownership. MedusaJS engine returns 501 (Q2 2026 roadmap).
 
 ## Project Structure
 
@@ -270,33 +282,40 @@ helm-charts/
 
 ## Upgrades & Rollback
 
-### Upgrade a store's WordPress version
+Upgrades and rollbacks are CRD-driven: the API patches the Store CRD and the operator reconciles the change.
 
-Update the chart version in `helm-charts/woocommerce/Chart.yaml`, then:
-
-```bash
-helm upgrade {storeId} helm-charts/woocommerce \
-  --namespace store-{storeId} \
-  --values helm-charts/woocommerce/values-local.yaml \
-  --wait --timeout 10m
-```
-
-The `--wait` flag ensures the upgrade only succeeds if all pods become ready with the new version. If the upgrade fails, the old ReplicaSet remains active — no data is lost.
-
-### Rollback to a previous version
+### Upgrade a store
 
 ```bash
-# Rollback to previous revision
-helm rollback {storeId} --namespace store-{storeId} --timeout 5m
-
-# Rollback to a specific revision
-helm rollback {storeId} 2 --namespace store-{storeId} --timeout 5m
-
-# View revision history
-helm history {storeId} --namespace store-{storeId}
+# Via API — patches spec.version, triggers helm upgrade in the operator:
+curl -X POST http://localhost:8080/api/stores/{id}/upgrade \
+  -H "Content-Type: application/json" \
+  -d '{"version": "1.1.0"}'
 ```
 
-The operator's `HelmManager.rollback()` method exposes this programmatically.
+The operator detects the spec change (generation > observedGeneration), sets phase to `Upgrading`, and runs `helm upgrade --wait`. On failure, it auto-rollbacks to the previous revision. The dashboard shows the current Helm revision and upgrade timestamp.
+
+### Rollback to a previous revision
+
+```bash
+# Via API — rollback to a specific revision:
+curl -X POST http://localhost:8080/api/stores/{id}/rollback \
+  -H "Content-Type: application/json" \
+  -d '{"revision": 1}'
+
+# View revision history:
+curl http://localhost:8080/api/stores/{id}/revisions
+```
+
+The operator sets phase to `RollingBack` and runs `helm rollback`. The dashboard shows a revision history table with rollback buttons.
+
+### Retry a failed store
+
+```bash
+curl -X POST http://localhost:8080/api/stores/{id}/retry
+```
+
+Resets the store to `Pending` for a fresh provisioning attempt.
 
 ### Horizontal Pod Autoscaling
 
@@ -311,9 +330,9 @@ The operator scales 1-3 replicas on CPU (70%) and memory (80%). The API scales 1
 
 ## Tech Stack
 
-- **Operator**: TypeScript, @kubernetes/client-node v1.4.0, prom-client
+- **Operator**: TypeScript, @kubernetes/client-node v1.4.0
 - **API**: Express.js, passport-github2, express-session, express-rate-limit
-- **Dashboard**: React 18, Vite 7, Tailwind CSS 4
+- **Dashboard**: React 19, Vite 7, Tailwind CSS 4
 - **Helm**: Chart API v2, Bitnami WordPress 28.x
 - **Cluster**: k3d (local), k3s (production)
 - **DNS**: nip.io wildcard (local), real domain (production)

@@ -1,5 +1,5 @@
 export type StoreEngine = 'woocommerce' | 'medusajs';
-export type StoreTemplate = 'general' | 'fashion' | 'food' | 'electronics';
+export type StoreTemplate = 'general' | 'fashion' | 'food' | 'electronics' | 'beauty' | 'sports' | 'books';
 
 export type StorePhase =
   | 'Pending'
@@ -8,13 +8,17 @@ export type StorePhase =
   | 'Verifying'
   | 'Ready'
   | 'Failed'
-  | 'Deleting';
+  | 'Deleting'
+  | 'Upgrading'
+  | 'RollingBack';
 
 export interface StoreSpec {
   engine: StoreEngine;
   storeName?: string;
   template?: StoreTemplate;
   owner?: string;
+  version?: string;
+  helmValues?: Record<string, unknown>;
 }
 
 export interface StoreStatus {
@@ -24,6 +28,10 @@ export interface StoreStatus {
   startedAt?: string;
   readyAt?: string;
   observedGeneration?: number;
+  retryCount?: number;
+  helmRevision?: number;
+  lastUpgradedAt?: string;
+  rollbackRevision?: number;
 }
 
 export interface Store {

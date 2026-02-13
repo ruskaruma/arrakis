@@ -22,6 +22,10 @@ const MERGE_PATCH: k8s.ConfigurationOptions = {
   }],
 };
 
+async function createIfAbsent(fn: () => Promise<any>): Promise<void> {
+  try { await fn(); } catch (err: any) { if (err?.code === 409) return; throw err; }
+}
+
 export async function namespaceExists(name: string): Promise<boolean> {
   try {
     await coreApi.readNamespace({ name });
@@ -37,10 +41,7 @@ export async function createNamespace(name: string, storeId: string): Promise<vo
     body: {
       metadata: {
         name,
-        labels: {
-          'app.kubernetes.io/managed-by': 'arrakis',
-          'arrakis.io/store-id': storeId,
-        },
+        labels: { 'app.kubernetes.io/managed-by': 'arrakis', 'arrakis.io/store-id': storeId },
       },
     },
   });
@@ -56,57 +57,39 @@ export async function deleteNamespace(name: string): Promise<void> {
 }
 
 export async function applyResourceQuota(namespace: string): Promise<void> {
-  try {
-    await coreApi.createNamespacedResourceQuota({
-      namespace,
-      body: {
-        metadata: { name: 'store-quota', namespace },
-        spec: {
-          hard: {
-            'requests.cpu': '500m',
-            'requests.memory': '1Gi',
-            'limits.cpu': '2',
-            'limits.memory': '3Gi',
-            'persistentvolumeclaims': '5',
-          },
+  await createIfAbsent(() => coreApi.createNamespacedResourceQuota({
+    namespace,
+    body: {
+      metadata: { name: 'store-quota', namespace },
+      spec: {
+        hard: {
+          'requests.cpu': '500m', 'requests.memory': '1Gi',
+          'limits.cpu': '2', 'limits.memory': '3Gi',
+          'persistentvolumeclaims': '5',
         },
       },
-    });
-  } catch (err: any) {
-    if (err?.code === 409) return;
-    throw err;
-  }
+    },
+  }));
 }
 
 export async function applyNetworkPolicies(namespace: string): Promise<void> {
   const policies: Array<{ name: string; spec: k8s.V1NetworkPolicySpec }> = [
-    {
-      name: 'default-deny-ingress',
-      spec: { podSelector: {}, policyTypes: ['Ingress'] },
-    },
+    { name: 'default-deny-ingress', spec: { podSelector: {}, policyTypes: ['Ingress'] } },
     {
       name: 'allow-traefik-ingress',
       spec: {
-        podSelector: {},
-        policyTypes: ['Ingress'],
-        ingress: [{
-          _from: [{
-            namespaceSelector: { matchLabels: { 'kubernetes.io/metadata.name': 'kube-system' } },
-            podSelector: { matchLabels: { 'app.kubernetes.io/name': 'traefik' } },
-          }],
-        }],
+        podSelector: {}, policyTypes: ['Ingress'],
+        ingress: [{ _from: [{
+          namespaceSelector: { matchLabels: { 'kubernetes.io/metadata.name': 'kube-system' } },
+          podSelector: { matchLabels: { 'app.kubernetes.io/name': 'traefik' } },
+        }] }],
       },
     },
     {
       name: 'allow-operator-ingress',
       spec: {
-        podSelector: {},
-        policyTypes: ['Ingress'],
-        ingress: [{
-          _from: [{
-            namespaceSelector: { matchLabels: { 'kubernetes.io/metadata.name': 'default' } },
-          }],
-        }],
+        podSelector: {}, policyTypes: ['Ingress'],
+        ingress: [{ _from: [{ namespaceSelector: { matchLabels: { 'kubernetes.io/metadata.name': 'default' } } }] }],
       },
     },
     {
@@ -120,63 +103,73 @@ export async function applyNetworkPolicies(namespace: string): Promise<void> {
         }],
       },
     },
+    { name: 'default-deny-egress', spec: { podSelector: {}, policyTypes: ['Egress'] } },
+    {
+      name: 'allow-dns-egress',
+      spec: {
+        podSelector: {}, policyTypes: ['Egress'],
+        egress: [{
+          to: [{ namespaceSelector: { matchLabels: { 'kubernetes.io/metadata.name': 'kube-system' } } }],
+          ports: [{ protocol: 'UDP', port: 53 }, { protocol: 'TCP', port: 53 }],
+        }],
+      },
+    },
+    {
+      name: 'allow-internal-egress',
+      spec: {
+        podSelector: {}, policyTypes: ['Egress'],
+        egress: [{ to: [{ podSelector: {} }] }],
+      },
+    },
+    {
+      name: 'allow-http-egress',
+      spec: {
+        podSelector: {}, policyTypes: ['Egress'],
+        egress: [{ ports: [{ protocol: 'TCP', port: 80 }, { protocol: 'TCP', port: 443 }] }],
+      },
+    },
   ];
 
   for (const policy of policies) {
-    try {
-      await networkingApi.createNamespacedNetworkPolicy({
-        namespace,
-        body: {
-          metadata: { name: policy.name, namespace },
-          spec: policy.spec,
-        },
-      });
-    } catch (err: any) {
-      if (err?.code === 409) continue;
-      throw err;
-    }
+    await createIfAbsent(() => networkingApi.createNamespacedNetworkPolicy({
+      namespace,
+      body: { metadata: { name: policy.name, namespace }, spec: policy.spec },
+    }));
   }
 }
 
 export async function applyLimitRange(namespace: string): Promise<void> {
-  try {
-    await coreApi.createNamespacedLimitRange({
-      namespace,
-      body: {
-        metadata: { name: 'store-limits', namespace },
-        spec: {
-          limits: [
-            {
-              type: 'Container',
-              _default: { cpu: '500m', memory: '512Mi' },
-              defaultRequest: { cpu: '100m', memory: '128Mi' },
-            },
-            {
-              type: 'PersistentVolumeClaim',
-              max: { storage: '5Gi' },
-            },
-          ],
-        },
+  await createIfAbsent(() => coreApi.createNamespacedLimitRange({
+    namespace,
+    body: {
+      metadata: { name: 'store-limits', namespace },
+      spec: {
+        limits: [
+          { type: 'Container', _default: { cpu: '500m', memory: '512Mi' }, defaultRequest: { cpu: '100m', memory: '128Mi' } },
+          { type: 'PersistentVolumeClaim', max: { storage: '5Gi' } },
+        ],
       },
-    });
-  } catch (err: any) {
-    if (err?.code === 409) return;
-    throw err;
-  }
+    },
+  }));
 }
 
 export async function updateStoreStatus(
   storeId: string,
-  status: Partial<NonNullable<Store['status']>>
+  status: Partial<NonNullable<Store['status']>>,
 ): Promise<void> {
-  await customApi.patchNamespacedCustomObjectStatus({
-    group: CRD_GROUP,
-    version: CRD_VERSION,
-    namespace: 'default',
-    plural: CRD_PLURAL,
-    name: storeId,
-    body: { status },
-  }, MERGE_PATCH);
+  const MAX_RETRIES = 3;
+  for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
+    try {
+      await customApi.patchNamespacedCustomObjectStatus({
+        group: CRD_GROUP, version: CRD_VERSION, namespace: 'default', plural: CRD_PLURAL,
+        name: storeId, body: { status },
+      }, MERGE_PATCH);
+      return;
+    } catch (err: any) {
+      if (err?.code === 409 && attempt < MAX_RETRIES - 1) continue;
+      throw err;
+    }
+  }
 }
 
 export function hasFinalizer(store: Store): boolean {
@@ -186,38 +179,38 @@ export function hasFinalizer(store: Store): boolean {
 export async function addFinalizer(store: Store): Promise<void> {
   const finalizers = [...(store.metadata.finalizers || []), FINALIZER];
   await customApi.patchNamespacedCustomObject({
-    group: CRD_GROUP,
-    version: CRD_VERSION,
-    namespace: 'default',
-    plural: CRD_PLURAL,
-    name: store.metadata.name,
-    body: { metadata: { finalizers } },
+    group: CRD_GROUP, version: CRD_VERSION, namespace: 'default', plural: CRD_PLURAL,
+    name: store.metadata.name, body: { metadata: { finalizers } },
   }, MERGE_PATCH);
 }
 
 export async function removeFinalizer(store: Store): Promise<void> {
   const finalizers = (store.metadata.finalizers || []).filter(f => f !== FINALIZER);
   await customApi.patchNamespacedCustomObject({
-    group: CRD_GROUP,
-    version: CRD_VERSION,
-    namespace: 'default',
-    plural: CRD_PLURAL,
-    name: store.metadata.name,
-    body: { metadata: { finalizers } },
+    group: CRD_GROUP, version: CRD_VERSION, namespace: 'default', plural: CRD_PLURAL,
+    name: store.metadata.name, body: { metadata: { finalizers } },
   }, MERGE_PATCH);
 }
 
 export async function getPodsReady(namespace: string): Promise<{ ready: number; total: number }> {
   const res = await coreApi.listNamespacedPod({ namespace });
   const pods = res.items || [];
-  const ready = pods.filter(p => {
-    const conditions = p.status?.conditions || [];
-    return conditions.some(c => c.type === 'Ready' && c.status === 'True');
-  }).length;
+  const ready = pods.filter(p =>
+    (p.status?.conditions || []).some(c => c.type === 'Ready' && c.status === 'True')
+  ).length;
   return { ready, total: pods.length };
 }
 
 export async function allPodsReady(namespace: string): Promise<boolean> {
   const { ready, total } = await getPodsReady(namespace);
   return total > 0 && ready === total;
+}
+
+export async function createSecret(namespace: string, name: string, data: Record<string, string>): Promise<void> {
+  const encoded: Record<string, string> = {};
+  for (const [k, v] of Object.entries(data)) encoded[k] = Buffer.from(v).toString('base64');
+  await createIfAbsent(() => coreApi.createNamespacedSecret({
+    namespace,
+    body: { metadata: { name, namespace }, type: 'Opaque', data: encoded },
+  }));
 }

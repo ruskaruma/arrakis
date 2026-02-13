@@ -8,11 +8,59 @@
   --color-primary-500: #6366f1;
   --color-primary-600: #4f46e5;
   --color-primary-700: #4338ca;
+  --color-spice-400: #d4a843;
+  --color-spice-500: #c8992e;
+  --color-spice-600: #b8891e;
+}
+
+/* Light theme (default) */
+:root {
+  --bg-base: #f5f6f8;
+  --bg-surface: #ffffff;
+  --bg-elevated: #ffffff;
+  --bg-input: #eef0f3;
+  --bg-hover: #e8eaee;
+  --bg-overlay: rgba(0, 0, 0, 0.5);
+  --border: #dfe2e6;
+  --border-strong: #cdd1d6;
+  --border-subtle: #f0f1f3;
+  --text-primary: #1a1d23;
+  --text-secondary: #5a6070;
+  --text-muted: #8b9099;
+  --text-dim: #b5b9c0;
+  --text-body: #3a3f4a;
+  --header-bg: rgba(245, 246, 248, 0.85);
+  --shadow-color: rgba(0, 0, 0, 0.08);
+}
+
+/* Dark theme */
+.dark {
+  --bg-base: #0a0a0f;
+  --bg-surface: rgba(255, 255, 255, 0.03);
+  --bg-elevated: #16161d;
+  --bg-input: rgba(255, 255, 255, 0.05);
+  --bg-hover: rgba(255, 255, 255, 0.06);
+  --bg-overlay: rgba(0, 0, 0, 0.7);
+  --border: rgba(255, 255, 255, 0.08);
+  --border-strong: rgba(255, 255, 255, 0.1);
+  --border-subtle: rgba(255, 255, 255, 0.04);
+  --text-primary: rgba(255, 255, 255, 0.9);
+  --text-secondary: rgba(255, 255, 255, 0.5);
+  --text-muted: rgba(255, 255, 255, 0.3);
+  --text-dim: rgba(255, 255, 255, 0.2);
+  --text-body: rgba(255, 255, 255, 0.6);
+  --header-bg: rgba(10, 10, 15, 0.8);
+  --shadow-color: rgba(0, 0, 0, 0.3);
 }
 
 @keyframes fade-in {
   from { opacity: 0; transform: translateY(8px); }
   to { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes slide-in {
+  from { opacity: 0; transform: translateX(16px); }
+  to { opacity: 1; transform: translateX(0); }
 }
 
 @keyframes pulse-dot {
@@ -24,6 +72,30 @@
   animation: fade-in 0.3s ease-out;
 }
 
+.animate-slide-in {
+  animation: slide-in 0.3s ease-out;
+}
+
 .animate-pulse-dot {
   animation: pulse-dot 2s ease-in-out infinite;
+}
+
+@keyframes float-particle {
+  0% { transform: translateY(100vh) rotate(0deg); opacity: 0; }
+  10% { opacity: 1; }
+  90% { opacity: 1; }
+  100% { transform: translateY(-100vh) rotate(360deg); opacity: 0; }
+}
+
+@keyframes grid-move {
+  0% { transform: translate(0, 0); }
+  100% { transform: translate(50px, 50px); }
+}
+
+.animate-float {
+  animation: float-particle 15s infinite linear;
+}
+
+.animate-grid-move {
+  animation: grid-move 20s linear infinite;
 }

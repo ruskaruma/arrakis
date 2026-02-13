@@ -4,9 +4,10 @@ import fs from 'fs';
 import { log } from './logger';
 
 const VALID_ENGINES = ['woocommerce', 'medusajs'];
-const VALID_TEMPLATES = ['general', 'fashion', 'food', 'electronics'];
+const VALID_TEMPLATES = ['general', 'fashion', 'food', 'electronics', 'beauty', 'sports', 'books'];
 const MAX_STORE_NAME_LENGTH = 64;
 const BLOCKED_ENGINES = ['medusajs'];
+const MAX_BODY_BYTES = 1024 * 1024; // 1MB
 
 interface AdmissionReview {
   apiVersion: string;
@@ -20,6 +21,8 @@ interface AdmissionReview {
         storeName?: string;
         template?: string;
         owner?: string;
+        version?: string;
+        helmValues?: unknown;
       };
     };
   };
@@ -58,6 +61,19 @@ function validateStore(review: AdmissionReview): ValidationResult {
     if (spec.storeName && !/^[\w\s\-'.]+$/.test(spec.storeName)) {
       return { allowed: false, message: 'storeName contains invalid characters' };
     }
+
+    if (spec.version !== undefined) {
+      if (typeof spec.version !== 'string') {
+        return { allowed: false, message: 'version must be a string' };
+      }
+      if (spec.version.length > 32) {
+        return { allowed: false, message: 'version must be 32 characters or fewer' };
+      }
+    }
+
+    if (spec.helmValues !== undefined && (typeof spec.helmValues !== 'object' || spec.helmValues === null || Array.isArray(spec.helmValues))) {
+      return { allowed: false, message: 'helmValues must be an object' };
+    }
   }
 
   return { allowed: true };
@@ -88,7 +104,12 @@ function handleRequest(req: http.IncomingMessage, res: http.ServerResponse): voi
   }
 
   let body = '';
-  req.on('data', (chunk: string) => { body += chunk; });
+  let bodySize = 0;
+  req.on('data', (chunk: Buffer) => {
+    bodySize += chunk.length;
+    if (bodySize > MAX_BODY_BYTES) { req.destroy(); return; }
+    body += chunk;
+  });
   req.on('end', () => {
     try {
       const review: AdmissionReview = JSON.parse(body);
