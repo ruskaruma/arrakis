@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
 import type { Store, StoreEvent, StoreCredentials, StoreMetrics, Product } from '../api.ts';
 import { deleteStore, retryStore, fetchStoreEvents, fetchStoreCredentials, fetchStoreMetrics, fetchProducts, createProduct, deleteProduct } from '../api.ts';
-import { timeAgo, formatDuration } from '../utils.ts';
+import { timeAgo, formatDuration, copyToClipboard } from '../utils.ts';
 import { toast } from './Toast.tsx';
 
 interface StoreCardProps {
@@ -130,7 +130,7 @@ export default function StoreCard({ store, onDeleted }: StoreCardProps) {
 
   async function handleCopyUrl() {
     if (!store.url) return;
-    await navigator.clipboard.writeText(store.url);
+    await copyToClipboard(store.url);
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
   }
@@ -291,7 +291,7 @@ export default function StoreCard({ store, onDeleted }: StoreCardProps) {
                   setCreds(c);
                 }
                 if (c?.password) {
-                  await navigator.clipboard.writeText(c.password);
+                  await copyToClipboard(c.password);
                   toast('info', 'Password copied — paste in WP-Admin');
                 }
                 setShowCreds(true);
@@ -364,7 +364,7 @@ export default function StoreCard({ store, onDeleted }: StoreCardProps) {
               <button
                 onClick={async () => {
                   if (creds.password) {
-                    await navigator.clipboard.writeText(creds.password);
+                    await copyToClipboard(creds.password);
                     toast('info', 'Password copied');
                   }
                 }}

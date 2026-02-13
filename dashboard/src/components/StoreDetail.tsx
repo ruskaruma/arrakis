@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import type { Store, StoreEvent, StoreCredentials, StoreMetrics, Product, HelmRevision } from '../api.ts';
 import { deleteStore, fetchStoreEvents, fetchStoreCredentials, fetchStoreMetrics, fetchProducts, createProduct, deleteProduct, fetchRevisions, rollbackToRevision } from '../api.ts';
-import { timeAgo, formatDuration } from '../utils.ts';
+import { timeAgo, formatDuration, copyToClipboard } from '../utils.ts';
 import { toast } from './Toast.tsx';
 
 interface StoreDetailProps {
@@ -16,7 +16,7 @@ function CopyButton({ text }: { text: string }) {
     <button
       onClick={async (e) => {
         e.stopPropagation();
-        await navigator.clipboard.writeText(text);
+        await copyToClipboard(text);
         setCopied(true);
         setTimeout(() => setCopied(false), 1500);
       }}
@@ -229,7 +229,7 @@ export default function StoreDetail({ store, onBack, onDeleted }: StoreDetailPro
             onClick={async () => {
               let c = creds;
               if (!c) { c = await fetchStoreCredentials(store.id); setCreds(c); }
-              if (c?.password) { await navigator.clipboard.writeText(c.password); toast('info', 'Password copied'); }
+              if (c?.password) { await copyToClipboard(c.password); toast('info', 'Password copied'); }
               const wpBase = store.url!.replace(/\/shop\/?$/, '');
               window.open(`${wpBase}/wp-login.php?log=${c?.username || 'user'}&redirect_to=${encodeURIComponent('/wp-admin/admin.php?page=wc-admin')}`, '_blank');
             }}
@@ -238,7 +238,7 @@ export default function StoreDetail({ store, onBack, onDeleted }: StoreDetailPro
             WP-Admin
           </button>
           <button
-            onClick={async () => { await navigator.clipboard.writeText(store.url!); toast('info', 'URL copied'); }}
+            onClick={async () => { await copyToClipboard(store.url!); toast('info', 'URL copied'); }}
             className="flex items-center justify-center gap-2 px-4 py-3 rounded-xl bg-[var(--bg-surface)] border border-[var(--border)] text-[var(--text-body)] text-sm hover:bg-[var(--bg-hover)] transition-colors"
           >
             Copy URL
