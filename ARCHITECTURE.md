@@ -1,446 +1,456 @@
-# Arrakis — System Design & Architecture
+# Arrakis — Architecture
 
 ## System Overview
 
-```
-                          +──────────────+
-                          │   Dashboard  │  React 19 + Vite + Tailwind
-                          │  :5173       │  Polls API every 5s
-                          +──────┬───────+
-                                 │ HTTP
-                          +──────▼───────+
-                          │   REST API   │  Express.js, :8080
-                          │              │  Rate limiting, audit log
-                          +──────┬───────+
-                                 │ K8s API (CRD CRUD)
-                   +─────────────▼─────────────+
-                   │      Kubernetes API        │
-                   │    (Store CRD: arrakis.io)  │
-                   +─────────────┬─────────────+
-                                 │ Watch + Periodic Sync
-                          +──────▼───────+
-                          │   Operator   │  TypeScript, @kubernetes/client-node
-                          │              │  Reconciler state machine
-                          │  :9091       │  /healthz (watch health + uptime)
-                          +──────┬───────+
-                                 │ For each store:
-               +─────────────────▼─────────────────+
-               │         Namespace: store-{id}      │
-               │  ┌───────────┐  ┌───────────────┐  │
-               │  │ WordPress │  │   MariaDB     │  │
-               │  │ (Bitnami) │──│ (StatefulSet) │  │
-               │  └───────────┘  └───────────────┘  │
-               │  + ResourceQuota                   │
-               │  + LimitRange                      │
-               │  + NetworkPolicies (8)             │
-               │  + Ingress ({id}.IP.nip.io)        │
-               │  + PVC (persistent storage)        │
-               +────────────────────────────────────+
+```mermaid
+graph TB
+    User([User]) -->|GitHub OAuth| Dash["Dashboard<br/>React 19 + Vite + Tailwind<br/>:5173"]
+    Dash -->|REST / poll 5s| API["REST API<br/>Express.js<br/>:8080"]
+    API -->|CRD CRUD| K8s["Kubernetes API Server"]
+    K8s -->|validates| WH["Admission Webhook<br/>:9443 TLS"]
+    K8s -->|watch stream| OP["Operator<br/>@kubernetes/client-node"]
+    K8s -->|30s periodic sync| OP
+    OP -->|leader election| Lease["Lease<br/>coordination.k8s.io"]
+    OP -->|helm upgrade --install| Store1["store-s1a2b3c4<br/>WordPress + MariaDB<br/>+ Quota + Policies"]
+    OP -->|helm upgrade --install| Store2["store-s86c8ba3<br/>WordPress + MariaDB<br/>+ Quota + Policies"]
+    OP -->|wp-cli exec| Store1
+    OP -->|wp-cli exec| Store2
 ```
 
-## Components
+Three components. The **API** is a thin translation layer — it takes HTTP requests, writes CRDs, and returns. The **Operator** watches CRDs and reconciles desired state by provisioning namespaces, installing Helm charts, configuring WooCommerce via WP-CLI, and verifying health. The **Dashboard** polls the API and renders store status, events, and actions.
 
-**Operator** — Kubernetes controller that watches Store CRDs and reconciles desired state. Runs a watch stream for real-time events and a 30-second periodic sync as a safety net. Manages the full lifecycle: namespace creation, Helm install, WooCommerce configuration via WP-CLI, verification, and finalizer-based cleanup.
-
-**API** — Thin REST layer over the Kubernetes API. Translates HTTP requests into CRD operations. Handles rate limiting (10 requests per 15 minutes on store creation), enforces a maximum of 10 concurrent stores, and writes structured audit logs for every create/delete action.
-
-**Dashboard** — React single-page app that polls the API every 5 seconds. Displays store status, URLs, timestamps, and Kubernetes events. Provides create and delete actions with confirmation dialogs.
-
-**Helm Charts** — Bitnami WordPress subchart with per-environment values files. The operator calls `helm upgrade --install --wait` to deploy stores, ensuring idempotent installs and atomic upgrades.
-
-## CRD Design
+## CRD Schema
 
 ```yaml
 apiVersion: arrakis.io/v1alpha1
 kind: Store
 metadata:
-  name: s86c8ba38        # 8-char hex ID from crypto.randomBytes(4)
-  namespace: default       # CRDs live in default namespace
-  finalizers:
-    - arrakis.io/store-cleanup
+  name: s86c8ba38                    # 8-char hex ID
+  finalizers: [arrakis.io/store-cleanup]
 spec:
-  engine: woocommerce      # woocommerce | medusajs (Q2 2026)
-  storeName: "My Fashion Store"  # optional, max 64 chars
-  template: fashion        # general | fashion | food | electronics | beauty | sports | books
-  owner: "12345678"        # GitHub user ID, set by API from OAuth
-  version: "1.1.0"         # optional, triggers upgrade when changed
-  helmValues: {}           # optional, additional Helm --set overrides
+  engine: woocommerce                # woocommerce | medusajs (planned)
+  storeName: "My Fashion Store"      # optional display name
+  template: fashion                  # 7 templates available
+  owner: "12345678"                  # GitHub user ID
+  version: "1.1.0"                   # optional, triggers upgrade
+  helmValues: {}                     # optional Helm --set overrides
 status:
-  phase: Ready             # Pending | Provisioning | Configuring | Verifying | Ready | Failed | Deleting | Upgrading | RollingBack
-  url: http://s86c8ba38.54.206.104.15.nip.io/shop
-  message: Store is running
-  startedAt: 2026-02-11T15:00:00Z
-  readyAt: 2026-02-11T15:01:14Z
-  observedGeneration: 1
-  helmRevision: 2          # current Helm release revision
-  lastUpgradedAt: 2026-02-12T10:00:00Z
-  rollbackRevision: 0      # set > 0 to trigger rollback, reconciler clears on pickup
+  phase: Ready                       # see state machine below
+  url: http://s86c8ba38.127.0.0.1.nip.io/shop
+  observedGeneration: 1              # prevents redundant reconciles
+  helmRevision: 2                    # current Helm release revision
+  rollbackRevision: 0                # set > 0 to trigger rollback
 ```
 
-### Phase State Machine
+## Phase State Machine
 
-```
-                    ┌──────────┐
-   Store created ──►│ Pending  │
-                    └────┬─────┘
-                         │ Add finalizer
-                    ┌────▼─────────┐
-                    │ Provisioning │ Create namespace, quota, policies, Helm install
-                    └────┬─────────┘
-                         │ All pods ready
-                    ┌────▼─────────┐
-                    │ Configuring  │ WP-CLI: install WooCommerce, seed template products, enable HPOS + COD
-                    └────┬─────────┘
-                         │ Setup complete
-                    ┌────▼─────────┐
-                    │  Verifying   │ HTTP 200 check + product count > 0
-                    └────┬─────────┘
-                         │ Verification passed
-                    ┌────▼─────────┐
-   spec changed ──► │    Ready     │ Store is live and serving traffic
-   (generation++)   └──┬────┬──────┘
-                       │    │
-         spec change ──┘    └── status.rollbackRevision set
-                       │              │
-                  ┌────▼──────┐  ┌────▼────────┐
-                  │ Upgrading │  │ RollingBack │
-                  └────┬──────┘  └────┬────────┘
-                       │              │
-              success ─┤              ├─ success → Ready
-              failure ─┤              └─ failure → Failed
-                       │
-            auto-rollback → Ready (with warning)
-            rollback fails → Failed
+```mermaid
+stateDiagram-v2
+    [*] --> Pending: Store created
+    Pending --> Provisioning: Add finalizer, create namespace
+    Provisioning --> Configuring: All pods ready
+    Configuring --> Verifying: WP-CLI setup complete
+    Verifying --> Ready: HTTP 200 + products exist
+
+    Ready --> Upgrading: spec changed (generation > observed)
+    Ready --> RollingBack: rollbackRevision set
+    Upgrading --> Ready: helm upgrade succeeded
+    Upgrading --> Ready: upgrade failed, auto-rollback succeeded
+    Upgrading --> Failed: upgrade + auto-rollback both failed
+    RollingBack --> Ready: helm rollback succeeded
+    RollingBack --> Failed: rollback failed
+
+    Provisioning --> Failed: timeout (10min) or error
+    Configuring --> Failed: timeout or error
+    Verifying --> Failed: verification failed
+    Failed --> Pending: retry requested
+
+    Ready --> Deleting: deletionTimestamp set
+    Pending --> Deleting: deletionTimestamp set
+    Failed --> Deleting: deletionTimestamp set
+    Deleting --> [*]: namespace + helm cleaned up, finalizer removed
 ```
 
-   Any phase can transition to Failed (timeout, error, verification failure)
-   deletionTimestamp triggers: any phase → Deleting → resource cleanup → CRD removed
-
-### observedGeneration
-
-The operator tracks `status.observedGeneration` to avoid unnecessary reconciles. When a Ready store's `metadata.generation` matches `status.observedGeneration`, the reconciler skips it entirely. This prevents redundant work when the CRD is updated without spec changes.
+The operator tracks `status.observedGeneration` — when a Ready store's `metadata.generation` matches, the reconciler skips it entirely, avoiding redundant work.
 
 ## Reconciliation Model
 
-The operator uses dual-mode reconciliation:
+```mermaid
+graph TB
+    subgraph "Dual-Mode Reconciliation"
+        Watch["Watch Stream<br/>Real-time ADDED/MODIFIED events"]
+        Sync["Periodic Sync (30s)<br/>Lists all CRDs, reconciles non-terminal"]
+    end
 
-**Watch stream** — Real-time Kubernetes watch on Store CRDs. Fires on ADDED/MODIFIED events. The watch callback is non-blocking: it calls `reconcile(store).catch(log)` and returns immediately, preventing slow reconciles from blocking the event stream.
+    Watch --> Reconcile
+    Sync --> Reconcile
 
-**Periodic sync (30s)** — Lists all Store CRDs every 30 seconds and reconciles any that aren't in a terminal state or have a deletion timestamp. Failed stores with retryCount < 3 are included in the sync, enabling automatic retry of transient failures. This catches events missed due to watch disconnects, API server restarts, or operator crashes.
+    Reconcile["reconcile(store)"]
+    Reconcile --> Guard{"activeReconciles<br/>has storeId?"}
+    Guard -->|yes| Skip[Skip]
+    Guard -->|no| Lock["Add to activeReconciles"]
+    Lock --> Phase{"Check phase +<br/>deletionTimestamp"}
 
-**Why dual-mode:** Watch alone is unreliable. Kubernetes watches can disconnect silently. The periodic sync acts as a consistency guarantee. This is the same pattern used by production controllers like the Kubernetes Deployment controller.
-
-**Concurrency control:** An `activeReconciles` Set prevents duplicate reconciliation of the same store. A batch size of 5 (`MAX_CONCURRENT_RECONCILES`) prevents overwhelming the cluster during periodic sync.
-
-## Tenant Isolation
-
-Each store gets its own Kubernetes namespace (`store-{id}`) with four layers of isolation:
-
-### ResourceQuota
-```
-requests.cpu: 500m          requests.memory: 1Gi
-limits.cpu: 2               limits.memory: 3Gi
-persistentvolumeclaims: 5
-```
-Prevents any single store from consuming unbounded cluster resources.
-
-### LimitRange
-```
-Container defaults:  cpu: 500m, memory: 512Mi
-Container requests:  cpu: 100m, memory: 128Mi
-PVC max:            5Gi
-```
-Ensures every container has resource limits even if the Helm chart doesn't specify them.
-
-### NetworkPolicies (8 per namespace)
-
-**Ingress Policies:**
-
-| Policy | Purpose |
-|---|---|
-| `default-deny-ingress` | Deny all inbound traffic by default |
-| `allow-traefik-ingress` | Allow traffic from the ingress controller (kube-system) |
-| `allow-operator-ingress` | Allow operator namespace to reach pods (for WP-CLI exec) |
-| `mariadb-restrict` | MariaDB only accepts connections from WordPress pods on port 3306 |
-
-**Egress Policies:**
-
-| Policy | Purpose |
-|---|---|
-| `default-deny-egress` | Deny all outbound traffic by default |
-| `allow-dns-egress` | Allow DNS resolution via kube-system (UDP/TCP 53) |
-| `allow-internal-egress` | Allow pod-to-pod communication within the namespace |
-| `allow-https-egress` | Allow HTTPS (port 443) for WordPress plugin updates and API calls |
-
-This implements defense-in-depth on both ingress and egress: even if an attacker compromises one store's WordPress pod, they cannot reach other stores' databases, exfiltrate data over non-HTTPS ports, or communicate with internal cluster services outside their namespace.
-
-### Namespace labels
-```yaml
-app.kubernetes.io/managed-by: arrakis
-arrakis.io/store-id: {storeId}
+    Phase -->|deletion| Delete["Helm uninstall → delete NS → remove finalizer"]
+    Phase -->|rollbackRevision > 0| Rollback["helm rollback → Ready or Failed"]
+    Phase -->|generation > observed| Upgrade["helm upgrade → Ready or auto-rollback"]
+    Phase -->|not Ready| Provision["Namespace → Helm → WP-CLI → Verify → Ready"]
 ```
 
-## Store Templates & HPOS
+**Why dual-mode?** Watch alone is unreliable — Kubernetes watches disconnect silently. The 30s sync re-lists all CRDs and reconciles anything stuck. Same pattern as the upstream Kubernetes Deployment controller.
 
-### Templates
-Each store is seeded with template-specific products on creation. The `spec.template` field controls which product set is deployed:
+**Concurrency:** `activeReconciles` Set prevents duplicate reconciliation. `MAX_CONCURRENT_RECONCILES = 5` batches periodic sync to avoid overwhelming the cluster.
 
-| Template | Products |
-|----------|----------|
-| `general` | Arrakis Spice Blend ($42) |
-| `fashion` | Desert Silk Robe ($89), Stillsuit Jacket ($149), Fremen Sandals ($59) |
-| `food` | Spice Melange Tea ($24), Arrakeen Coffee Beans ($32), Sietch Bread Mix ($12) |
-| `electronics` | Holtzman Shield Generator ($299), Ornithopter Navigation Module ($199), Thumper Device ($79) |
-| `beauty` | Spice Essence Perfume ($68), Desert Rose Skin Oil ($45), Sietch Mineral Soap ($18) |
-| `sports` | Sandworm Rider Harness ($185), Fremen Combat Training Kit ($120), Desert Running Sandals ($75) |
-| `books` | The Collected Sayings of Muad'Dib ($32), Ecology of Dune ($28), The Orange Catholic Bible ($55) |
+## 1. Production Deployment
 
-Product seeding is idempotent: `wp wc product list --format=count` checks if products already exist before creating.
+```mermaid
+graph LR
+    subgraph "Local (k3d)"
+        L_Ingress["Traefik (k3d default)"]
+        L_Storage["local-path (1Gi)"]
+        L_DNS["nip.io wildcard"]
+        L_TLS["None (HTTP)"]
+        L_Replicas["1 WordPress replica"]
+    end
 
-### High-Performance Order Storage (HPOS)
-Every store is configured with WooCommerce's HPOS — the major architectural change moving order data from WordPress `wp_posts`/`wp_postmeta` tables to dedicated `wp_wc_orders` / `wp_wc_orders_meta` tables. This enables:
-- 5-10x faster order queries at scale
-- Proper database indexing on order-specific columns
-- Compatibility with WooCommerce's future direction (HPOS is now the default in WC 8.2+)
-
-Enabled via two WP-CLI commands during the Configuring phase:
-```
-wp option update woocommerce_feature_custom_order_tables_enabled yes
-wp option update woocommerce_custom_orders_table_enabled yes
+    subgraph "Production (k3s VPS)"
+        P_Ingress["nginx-ingress"]
+        P_Storage["Longhorn distributed (10Gi)"]
+        P_DNS["Wildcard A record (*.domain.com)"]
+        P_TLS["cert-manager + Let's Encrypt"]
+        P_Replicas["2 replicas + PDB"]
+    end
 ```
 
-## Security Posture
+All differences are expressed through Helm values files (`values-local.yaml` vs `values-prod.yaml`) — the operator code is identical between environments. Production adds:
 
-### Validating Admission Webhook
-Server-side validation at the Kubernetes API level — defense-in-depth alongside API route validation:
+- **nginx-ingress** instead of Traefik for production-grade load balancing
+- **cert-manager** with Let's Encrypt for automatic TLS certificate provisioning
+- **Longhorn** for distributed, replicated storage (10Gi per store vs 1Gi local)
+- **2 WordPress replicas** with `PodDisruptionBudget` and pod anti-affinity for node spread
+- **`readOnlyRootFilesystem: true`** in container security context
+- **Wildcard DNS** — `*.yourdomain.com` A record pointing to VPS IP; each store gets `{id}.yourdomain.com`
 
-- Engine must be a valid CRD enum value (`woocommerce` or `medusajs`)
-- Blocked engines (`medusajs`) rejected before CRD is persisted
-- Store name: max 64 characters, alphanumeric + spaces/hyphens/apostrophes only
-- Template must be a valid enum value
-- Webhook runs on port 9443 in the operator process, TLS via self-signed certs (`config/scripts/gen-webhook-certs.sh`)
+Deployed on AWS EC2 (c7i-flex.large) running k3s.
 
-This means invalid stores are rejected at three layers:
-1. **CRD OpenAPI schema** — Kubernetes API server validates enum values
-2. **Admission webhook** — Custom validation logic (name format, blocked engines)
-3. **API route handler** — Express.js validates before creating CRD
+## 2. Multi-Tenant Isolation
 
-### Authentication & Authorization
-- GitHub OAuth via `passport-github2` with session-based auth (`express-session`)
-- All `/api/*` routes protected by `isAuthenticated` middleware
-- Per-user store ownership: `spec.owner` set from GitHub user ID at creation
-- Store list/delete scoped to authenticated user's stores only
-- `SKIP_AUTH=true` bypass for local development
+```mermaid
+graph TB
+    subgraph "store-{id} namespace"
+        WP["WordPress Pod"]
+        DB["MariaDB Pod"]
+        PVC["PVC (storage)"]
 
-### RBAC (Least Privilege)
-The operator runs under a dedicated ServiceAccount (`arrakis-operator`) with a ClusterRole scoped to exactly the verbs it needs:
+        subgraph "ResourceQuota"
+            RQ["CPU: 500m req / 2 limit<br/>Memory: 1Gi req / 3Gi limit<br/>PVCs: max 5"]
+        end
 
-| Resource | Verbs |
-|---|---|
-| stores (CRD) | get, list, watch, patch |
-| stores/status | patch |
-| stores/finalizers | patch |
-| namespaces | get, list, create, delete |
-| pods | get, list |
-| pods/exec | create |
-| resourcequotas | create, get |
-| limitranges | create, get |
-| networkpolicies | create, get |
-| events | list, create |
-| secrets | create, get |
-| leases (coordination.k8s.io) | get, create, update |
-| deployments | get |
+        subgraph "LimitRange"
+            LR["Default: 500m CPU, 512Mi mem<br/>Request: 100m CPU, 128Mi mem<br/>PVC max: 5Gi"]
+        end
 
-No wildcard permissions. No write access to resources outside its scope. Events create is used for K8s event emission during reconciliation. Leases support leader election for operator HA.
-
-### Container Hardening (All Environments)
-Applied in both `values-local.yaml` and `values-prod.yaml`:
-```yaml
-containerSecurityContext:
-  runAsNonRoot: true
-  allowPrivilegeEscalation: false
-  capabilities:
-    drop: [ALL]
+        subgraph "NetworkPolicies (8)"
+            NP1["default-deny-ingress"]
+            NP2["allow-traefik-ingress"]
+            NP3["allow-operator-ingress"]
+            NP4["mariadb-restrict (WP only, port 3306)"]
+            NP5["default-deny-egress"]
+            NP6["allow-dns-egress (UDP/TCP 53)"]
+            NP7["allow-internal-egress"]
+            NP8["allow-https-egress (port 443)"]
+        end
+    end
 ```
-Production adds `readOnlyRootFilesystem: true` and a PodDisruptionBudget.
 
-### Secret Management
-All secrets (WordPress admin password, MariaDB root/user passwords) are generated by the Bitnami Helm chart at deploy time and stored as Kubernetes Secrets in the store's namespace. No secrets exist in source code, environment variables, or configuration files.
+Each store gets a dedicated namespace with four layers of isolation:
 
-### Audit Logging
-Every store action (create, delete, retry, credential access) is logged with a structured JSON entry containing timestamp, action, store ID, and client IP address. The audit log is persisted in a ring buffer (last 1000 entries) and queryable via `GET /api/audit`. The operator emits structured JSON logs and Kubernetes Events for every reconciliation phase transition, enabling full traceability via both `kubectl describe store` and the dashboard events panel.
+- **ResourceQuota** — hard caps on CPU, memory, and PVC count per namespace
+- **LimitRange** — default container limits and max PVC size, even if Helm chart doesn't specify
+- **8 NetworkPolicies** — deny-by-default on both ingress and egress, with explicit allows for ingress controller, operator exec, DNS, internal pod traffic, and HTTPS outbound only
+- **Namespace labels** — `arrakis.io/store-id` and `app.kubernetes.io/managed-by: arrakis` for identification
 
-### Kubernetes Events (Operator)
+A compromised WordPress pod cannot reach other stores' databases, exfiltrate data over non-HTTPS ports, or communicate with internal services outside its namespace.
 
-| Event Reason | Type | When |
-|---|---|---|
-| `PhaseTransition` | Normal | Store enters Configuring, Verifying, Ready, or Deleting phase |
-| `HelmInstall` | Normal | Helm release installed successfully |
-| `HelmRollback` | Warning | Failed upgrade rolled back to previous revision |
-| `HelmCleanup` | Warning | Failed first install removed for retry |
-| `UpgradeStarted` | Normal | CRD-driven Helm upgrade initiated |
-| `UpgradeSucceeded` | Normal | Helm upgrade completed successfully |
-| `UpgradeFailed` | Warning | Helm upgrade failed |
-| `AutoRollback` | Warning | Auto-rolled back after failed upgrade |
-| `RollbackStarted` | Normal | Manual rollback to target revision initiated |
-| `RollbackSucceeded` | Normal | Rollback completed successfully |
-| `RollbackFailed` | Warning | Rollback to target revision failed |
-| `ProvisionTimeout` | Warning | Store stuck in Provisioning/Configuring > 10 minutes |
-| `RetryReconcile` | Warning | Reconciliation failed, retrying (1-3 attempts) |
+## 3. Idempotency & Recovery
 
-Events are visible via `kubectl describe store <id>` and the dashboard events panel.
+```mermaid
+graph TB
+    Create["Store creation attempt"] --> NS{"Namespace exists?"}
+    NS -->|yes| Helm{"Helm release exists?"}
+    NS -->|no| CreateNS["Create namespace (409 → skip)"]
+    CreateNS --> ApplyQuota["Apply quota + policies (409 → skip)"]
+    ApplyQuota --> Helm
 
-### Health Check
+    Helm -->|deployed| Pods{"Pods ready?"}
+    Helm -->|failed, rev > 1| RollbackHelm["helm rollback"]
+    Helm -->|failed, rev 1| CleanHelm["helm uninstall → retry"]
+    Helm -->|not found| Install["helm upgrade --install (idempotent)"]
+    Install --> Pods
+    RollbackHelm --> Pods
+    CleanHelm --> Pods
 
-The operator serves a health endpoint at `:9091/healthz` (implemented in `operator/src/metrics.ts`). It reports watch stream health status and process uptime, enabling Kubernetes liveness probes to detect a degraded operator.
+    Pods -->|yes| WPSetup["WP-CLI setup<br/>(checks existing products before seeding)"]
+    Pods -->|no| Wait["Wait, update status"]
 
-## Abuse Prevention
+    WPSetup --> Verify["HTTP 200 + product count > 0"]
+    Verify -->|pass| Ready["Ready"]
+    Verify -->|fail| Error["Error → retry (up to 3)"]
+```
+
+- **Namespace creation** catches HTTP 409 (already exists) and continues
+- **Helm install** uses `upgrade --install` which is idempotent
+- **Product seeding** checks `wp wc product list --format=count` before creating
+- **All K8s resources** (quota, policies, limit range, secrets) catch 409 on create
+- **Status updates** retry on 409 conflict (up to 3 attempts)
+- **Operator crash recovery** — the 30s periodic sync re-lists all CRDs and reconciles anything non-terminal. No in-memory state needed; all state lives in CRD status.
+- **Retry-before-fail** — errors increment `retryCount`, store resets to Pending for full re-provisioning. After 3 consecutive failures → permanent `Failed`.
+- **Clean deletion** — finalizer prevents CRD garbage collection until: Helm uninstall → namespace delete → finalizer removed.
+
+## 4. Abuse Prevention
+
+```mermaid
+graph LR
+    Req([Request]) --> RL{"Rate limit<br/>10 / 15min"}
+    RL -->|exceeded| R429[429 Too Many Requests]
+    RL -->|ok| Auth{"Authenticated?"}
+    Auth -->|no| R401[401 Unauthorized]
+    Auth -->|yes| Quota{"Stores < 10?"}
+    Quota -->|no| R429b[429 Max stores]
+    Quota -->|yes| Create["Create CRD"]
+    Create --> Webhook{"Admission webhook<br/>valid?"}
+    Webhook -->|no| R403[403 Rejected]
+    Webhook -->|yes| Reconcile["Operator reconciles"]
+    Reconcile --> Timeout{"10min<br/>timeout?"}
+    Timeout -->|yes| Failed["Failed + logged"]
+    Timeout -->|no| Ready["Ready"]
+```
 
 | Control | Implementation |
 |---|---|
-| Rate limiting | 10 store creation requests per 15 minutes (express-rate-limit) |
-| Store quota | Maximum 10 concurrent stores (returns HTTP 429) |
-| Provisioning timeout | 10-minute timeout, auto-fails stores stuck in Provisioning/Configuring |
+| Rate limiting | 10 store creation requests per 15 minutes (`express-rate-limit`) |
+| Per-user store quota | Maximum 10 concurrent stores per authenticated user (HTTP 429) |
+| Provisioning timeout | 10-minute timeout → auto-fails stores stuck in Provisioning/Configuring |
 | Resource caps | ResourceQuota + LimitRange per namespace |
-| Audit trail | Structured JSON logs with IP, action, timestamp + queryable via `GET /api/audit` |
+| 3-layer validation | CRD OpenAPI schema → admission webhook → API route handler |
+| Audit trail | Structured JSON logs with IP, action, timestamp; queryable via `GET /api/audit` |
 
-## Idempotency & Recovery
+## 5. Observability
 
-**Store creation is safe to retry:**
-- Namespace creation: catches HTTP 409 (already exists) and continues
-- Helm install: uses `upgrade --install` which is idempotent
-- WooCommerce product: checks for existing product via `wp wc product list --search` before creating
-- NetworkPolicies, ResourceQuota, LimitRange: all catch 409 and continue
-- Status updates: retry on HTTP 409 conflict (up to 3 attempts)
+```mermaid
+graph TB
+    subgraph "Operator Events"
+        E1["PhaseTransition → Normal"]
+        E2["HelmInstall → Normal"]
+        E3["UpgradeFailed → Warning"]
+        E4["AutoRollback → Warning"]
+        E5["ProvisionTimeout → Warning"]
+        E6["RetryReconcile → Warning"]
+    end
 
-**Retry-before-fail (3 retries):**
-- Errors during reconciliation increment `status.retryCount`
-- On retry (retryCount < 3), the store phase resets to `Pending` and the full provisioning flow re-runs from the beginning
-- After 3 consecutive failures, the store transitions to `Failed` permanently
-- Failed stores with retryCount < 3 are included in the periodic sync, ensuring automatic retry even if the watch stream misses the event
-- The retry endpoint (`POST /api/stores/:id/retry`) resets a Failed store to Pending with retryCount=0, allowing a fresh start from the dashboard
+    subgraph "Surfaces"
+        CLI["kubectl describe store {id}"]
+        Dash["Dashboard event timeline"]
+        Audit["GET /api/audit"]
+        Stats["GET /api/stats"]
+        Metrics["GET /api/stores/:id/metrics"]
+    end
 
-**Operator crash recovery:**
-- The 30-second periodic sync re-lists all CRDs and reconciles non-terminal stores
-- No in-memory state is required for recovery; all state is in the CRD status
-- Stores stuck in Provisioning/Configuring will either complete or timeout to Failed
-
-**Clean deletion:**
-- Finalizer (`arrakis.io/store-cleanup`) prevents the CRD from being garbage collected before resources are cleaned up
-- Deletion order: update status → Helm uninstall → delete namespace → remove finalizer
-- If the operator crashes during deletion, the periodic sync picks it up and retries
-
-## Local vs Production
-
-| Concern | Local (values-local.yaml) | Production (values-prod.yaml) |
-|---|---|---|
-| Cluster | k3d | k3s on VPS |
-| Ingress controller | Traefik (k3d default) | nginx-ingress |
-| TLS | None (HTTP) | cert-manager + Let's Encrypt |
-| Storage class | local-path | Longhorn (distributed) |
-| Storage size | 1Gi | 10Gi |
-| WordPress replicas | 1 | 2 + PodDisruptionBudget |
-| Pod anti-affinity | None | Preferred spread across nodes |
-| Container security | runAsNonRoot, drop ALL | + readOnlyRootFilesystem, PDB |
-| DNS | nip.io ({id}.127.0.0.1.nip.io) | Wildcard A record (*.stores.domain.com) |
-| Resource requests | 50m CPU, 256Mi memory | 250m CPU, 512Mi memory |
-| Liveness probes | Helm defaults | Tuned (initialDelay: 30s, period: 15s) |
-
-The operator code is identical between environments. All differences are expressed through Helm values files, fulfilling the assignment requirement of "configuration changes only."
-
-## Horizontal Scaling
-
-### What scales horizontally
-- **API server**: Stateless Express.js app. Scale via HPA on CPU utilization with 2-5 replicas.
-- **Dashboard**: Static React build served by nginx. Scale arbitrarily.
-- **Per-store WordPress**: Each store can scale to 2+ replicas with session affinity (values-prod.yaml already configures 2 replicas + PDB).
-
-### Operator (leader-elected)
-- **Leader election**: Kubernetes Lease-based leader election (`coordination.k8s.io/v1`). Only the leader runs the watch stream and periodic sync. Standby replicas monitor the lease and take over within 15 seconds if the leader fails.
-- **HPA**: `config/hpa-operator.yaml` scales 1-3 replicas at 70% CPU. Only the leader reconciles; standbys serve metrics and the admission webhook (stateless).
-- **Identity**: Each operator instance identifies by `hostname-pid`, written to the Lease's `holderIdentity` field.
-
-### Scaling provisioning throughput
-- `MAX_CONCURRENT_RECONCILES = 5` limits parallel provisioning to prevent cluster overload
-- Batched `Promise.allSettled()` processes stores in groups of 5 during periodic sync
-- Future: pod pre-warming pool (pre-provision WordPress pods, claim on store create) would reduce provisioning from ~3 minutes to ~10 seconds
-
-### HPA Configuration
-HPA manifests are provided in `config/hpa-operator.yaml` and `config/hpa-api.yaml` targeting 70% CPU utilization.
-
-## Upgrade & Rollback
-
-### CRD-Driven Upgrades
-Upgrades are triggered by patching `spec.version` or `spec.helmValues` on the Store CRD. This bumps `metadata.generation`. The reconciler detects `generation > observedGeneration` on Ready stores and runs `handleUpgrade()`:
-
-1. Sets phase to `Upgrading`
-2. Runs `helm upgrade --wait --timeout 10m` with the new `--set` values
-3. On success: phase → `Ready`, updates `helmRevision` and `lastUpgradedAt`
-4. On failure: **auto-rollback** via `helm rollback` → `Ready` with warning message. If rollback also fails → `Failed`
-5. Sets `observedGeneration = generation` in all cases to prevent infinite retry loops
-
-```bash
-# Via API:
-curl -X POST http://localhost:8080/api/stores/{id}/upgrade \
-  -H "Content-Type: application/json" \
-  -d '{"version": "1.1.0", "helmValues": {"wordpress.replicaCount": "2"}}'
+    E1 --> CLI
+    E1 --> Dash
+    E3 --> CLI
+    E3 --> Dash
 ```
 
-### Real Helm Rollback
-Rollback is triggered by setting `status.rollbackRevision` on the CRD (via `POST /api/stores/:id/rollback`). The reconciler picks it up with highest priority (checked before all other phases):
+- **Kubernetes Events** — operator emits 13 event types (Normal + Warning) on every phase transition, install, upgrade, rollback, timeout, and retry. Visible via `kubectl describe store` and the dashboard.
+- **Store-level event timeline** — dashboard shows events per store with timestamps, type, and message.
+- **Audit log** — ring buffer of last 1000 actions (create, delete, retry, credential access) with IP and timestamp. Queryable via `GET /api/audit`.
+- **Stats endpoint** — `GET /api/stats` returns store count by phase and average provisioning duration.
+- **Resource metrics** — `GET /api/stores/:id/metrics` returns per-pod CPU, memory, and storage from the K8s metrics API.
+- **Structured logging** — operator logs structured JSON with log code, message, and store ID context for every operation.
+- **Clear failure reporting** — `status.message` contains the specific error message, retry count, and whether it was a timeout, verification failure, or Helm error.
+- **Health endpoint** — operator `:9091/healthz` reports watch stream health and process uptime for liveness probes.
 
-1. Clears `rollbackRevision` immediately to prevent re-triggering
-2. Sets phase to `RollingBack`
-3. Runs `helm rollback` to the target revision
-4. On success: phase → `Ready` with new `helmRevision`
-5. On failure: phase → `Failed`
+## 6. Security Hardening
 
-```bash
-# Rollback to a specific revision:
-curl -X POST http://localhost:8080/api/stores/{id}/rollback \
-  -H "Content-Type: application/json" \
-  -d '{"revision": 1}'
+```mermaid
+graph TB
+    subgraph "Authentication & Authorization"
+        OAuth["GitHub OAuth<br/>(passport-github2)"]
+        Session["express-session<br/>(httpOnly, secure in prod)"]
+        Owner["Per-user ownership<br/>(spec.owner from GitHub ID)"]
+    end
 
-# Rollback to previous revision (omit body):
-curl -X POST http://localhost:8080/api/stores/{id}/rollback
+    subgraph "Admission Control"
+        CRD_Schema["CRD OpenAPI schema validation"]
+        Webhook["Validating admission webhook<br/>(engine, name, template, version)"]
+        Route["API route validation<br/>(before CRD creation)"]
+    end
+
+    subgraph "RBAC (Least Privilege)"
+        SA["ServiceAccount: arrakis-operator"]
+        CR["ClusterRole: exact verbs per resource<br/>No wildcards"]
+    end
+
+    subgraph "Container Hardening"
+        NonRoot["runAsNonRoot: true"]
+        NoCaps["capabilities: drop ALL"]
+        NoEscalate["allowPrivilegeEscalation: false"]
+        ReadOnly["readOnlyRootFilesystem (prod)"]
+    end
+
+    subgraph "Network Isolation"
+        DenyIngress["default-deny-ingress"]
+        DenyEgress["default-deny-egress"]
+        MariaDB["MariaDB: WP-only on 3306"]
+    end
 ```
 
-### Revision History
-`GET /api/stores/:id/revisions` spawns `helm history` directly (read-only, safe). The dashboard displays a revision history table with "Rollback" buttons on non-current revisions.
+**RBAC** — operator runs under `arrakis-operator` ServiceAccount with a ClusterRole scoped to exact verbs per resource. No wildcards. No write access outside its scope.
 
-### Failed Release Recovery
-The reconciler also detects failed Helm releases during initial provisioning via `helm status -o json`:
-- **Upgrade failure** (revision > 1): Calls `helm rollback` to restore the previous good revision. Emits a `HelmRollback` K8s Event.
-- **First install failure** (revision 1): Calls `helm uninstall` to clean up the broken release, then retries from scratch on the next reconcile cycle. Emits a `HelmCleanup` K8s Event.
+**3-layer validation** — invalid stores are rejected at CRD schema (K8s API server), admission webhook (custom logic), and API route handler (Express validation).
 
-### Retry
-`POST /api/stores/:id/retry` resets a Failed store to `Pending` with `retryCount=0`. The operator re-runs the full provisioning flow. The dashboard exposes this as a "Retry" button on failed store cards.
+**Container hardening** — all containers run as non-root, drop all capabilities, and disallow privilege escalation. Production adds read-only root filesystem.
 
-### CRD versioning
-The CRD uses `v1alpha1` API version. When the schema evolves, a conversion webhook would handle `v1alpha1` → `v1beta1` migration while maintaining backward compatibility.
+**Network policies** — 8 policies per namespace implement deny-by-default ingress and egress. MariaDB only accepts connections from WordPress pods on port 3306.
 
-## MedusaJS Extensibility (Planned — Q2 2026)
+**Secret management** — all secrets (WordPress admin password, MariaDB passwords, WC API keys) are generated at deploy time and stored as Kubernetes Secrets. No secrets in source code.
 
-The CRD schema accepts `spec.engine: "medusajs"` and the admission webhook blocks it with a 501 response. The API route handler also returns 501. No MedusaJS reconciliation logic exists yet.
+**Session security** — production requires `SESSION_SECRET` env var (exit on missing), cookies are `httpOnly` and `secure` in production.
 
-Adding MedusaJS requires:
-1. **Helm chart** (`helm-charts/medusajs/`) — MedusaJS server + PostgreSQL + Redis
-2. **Setup module** — Implement product seeding via Medusa Admin API (currently `medusajs-setup.ts` is a stub that throws)
-3. **Verifier** — HTTP health check + product API check
-4. **Reconciler dispatch** — Add engine branching in the reconciler (currently WooCommerce-only)
+## 7. Scaling
 
-The namespace isolation, ResourceQuota, LimitRange, NetworkPolicies, and finalizer cleanup are engine-agnostic. Only the Helm chart and setup/verification modules would differ per engine.
+```mermaid
+graph TB
+    subgraph "Horizontal Scaling"
+        API_HPA["API HPA<br/>1-5 replicas<br/>70% CPU target"]
+        OP_HPA["Operator HPA<br/>1-3 replicas<br/>70% CPU target"]
+        WP_Scale["WordPress<br/>2 replicas (prod)<br/>+ PDB"]
+    end
 
-## Tradeoffs & Alternatives Considered
+    subgraph "Leader Election"
+        Leader["Leader instance<br/>Runs watch + sync"]
+        Standby1["Standby<br/>Webhook + healthz only"]
+        Standby2["Standby<br/>Webhook + healthz only"]
+        Lease["K8s Lease<br/>15s duration<br/>10s renew"]
+    end
 
-### Raw @kubernetes/client-node vs dot-i/k8s-operator (framework)
-**Chose:** Raw client-node. The operator framework (@dot-i/k8s-operator, 178 stars) provides watch abstraction and finalizer helpers, but our use case requires a multi-phase state machine with Helm integration, WP-CLI orchestration, and CRD-driven upgrades. The framework's event-queue model doesn't support our dual-mode reconciliation or batched concurrency control. Building on the raw client gives full control over the reconciliation loop.
+    Leader -->|renews| Lease
+    Standby1 -->|monitors| Lease
+    Standby2 -->|monitors| Lease
+    Lease -->|leader fails| Standby1
+```
 
-### kubectl exec (WP-CLI) vs Kubernetes Jobs
-**Chose:** kubectl exec. Jobs create additional pods that consume ResourceQuota, require cleanup, and add latency. Direct exec into the running WordPress pod is faster, simpler, and uses the same container that will serve traffic. The downside is coupling to the pod lifecycle, which is acceptable since we verify pod readiness before exec.
+- **API** — stateless Express.js, scales horizontally via HPA (1-5 replicas on CPU).
+- **Dashboard** — static React build, scales arbitrarily.
+- **Operator** — Lease-based leader election (`coordination.k8s.io`). Only the leader runs watch + sync. Standby replicas serve the admission webhook and health endpoint. Failover within 15 seconds.
+- **Concurrency controls** — `MAX_CONCURRENT_RECONCILES = 5` batches periodic sync with `Promise.allSettled()`. `activeReconciles` Set prevents duplicate reconciliation.
+- **Per-store WordPress** — 2 replicas in production with PodDisruptionBudget and pod anti-affinity for node spread.
 
-### Namespace-per-store vs label-based isolation
-**Chose:** Namespace-per-store. Labels provide logical grouping but not security isolation. Namespaces provide: RBAC boundaries, NetworkPolicy scope, ResourceQuota enforcement, and clean teardown (delete namespace removes everything). The overhead of one namespace per store is negligible for the expected scale (tens to low hundreds of stores).
+## 8. Upgrades & Rollback
 
-### --atomic vs --wait for Helm installs
-**Chose:** --wait. The `--atomic` flag auto-uninstalls the release on failure, destroying PersistentVolumeClaims and data. `--wait` has identical success behavior but leaves failed releases in place with data intact, allowing diagnosis and retry without data loss.
+```mermaid
+sequenceDiagram
+    participant User
+    participant API
+    participant K8s as K8s API
+    participant Op as Operator
+    participant Helm
+
+    Note over User,Helm: Upgrade Flow
+    User->>API: POST /stores/{id}/upgrade {version: "1.1.0"}
+    API->>K8s: PATCH spec.version (bumps generation)
+    K8s->>Op: MODIFIED event (generation > observedGeneration)
+    Op->>Op: Set phase = Upgrading
+    Op->>Helm: helm upgrade --wait --timeout 10m
+    alt success
+        Helm-->>Op: exit 0
+        Op->>K8s: phase = Ready, helmRevision++
+    else failure
+        Helm-->>Op: exit 1
+        Op->>Helm: helm rollback (auto)
+        alt rollback ok
+            Helm-->>Op: exit 0
+            Op->>K8s: phase = Ready (with warning)
+        else rollback fails
+            Op->>K8s: phase = Failed
+        end
+    end
+
+    Note over User,Helm: Rollback Flow
+    User->>API: POST /stores/{id}/rollback {revision: 1}
+    API->>K8s: PATCH status.rollbackRevision = 1
+    K8s->>Op: MODIFIED event
+    Op->>Op: Clear rollbackRevision, set phase = RollingBack
+    Op->>Helm: helm rollback {id} 1
+    alt success
+        Op->>K8s: phase = Ready, new helmRevision
+    else failure
+        Op->>K8s: phase = Failed
+    end
+```
+
+**CRD-driven upgrades** — API patches `spec.version` or `spec.helmValues`, bumping `metadata.generation`. Operator detects `generation > observedGeneration` on Ready stores, runs `helm upgrade --wait`. On failure, auto-rollbacks to the previous revision.
+
+**Real Helm rollback** — `POST /stores/:id/rollback` sets `status.rollbackRevision` on the CRD. Operator picks it up with highest priority, clears the field to prevent re-triggering, runs `helm rollback` to the target revision.
+
+**Revision history** — `GET /stores/:id/revisions` returns Helm release history. Dashboard shows a revision table with rollback buttons.
+
+**Failed release recovery** — during provisioning, operator checks `helm status`. Revision > 1 with failed status → rollback. Revision 1 failed → uninstall and retry from scratch.
+
+**Retry** — `POST /stores/:id/retry` resets to Pending with `retryCount=0` for a fresh provisioning attempt.
+
+## Request Flow
+
+```mermaid
+sequenceDiagram
+    participant User
+    participant Dash as Dashboard
+    participant API
+    participant K8s as K8s API
+    participant WH as Webhook
+    participant Op as Operator
+    participant Helm
+    participant WP as WordPress Pod
+
+    User->>Dash: Click "Create Store"
+    Dash->>API: POST /api/stores {engine, template}
+    API->>API: Validate + check quota
+    API->>K8s: Create Store CRD
+    K8s->>WH: Admission review
+    WH-->>K8s: Allowed
+    K8s-->>API: Created
+    API-->>Dash: 201 {id, phase: Pending}
+
+    K8s->>Op: Watch event: ADDED
+    Op->>K8s: Add finalizer
+    Op->>K8s: Create namespace + quota + policies
+    Op->>Helm: helm upgrade --install --wait
+    Note over Helm: Deploys WordPress + MariaDB
+    Helm-->>Op: Release deployed
+
+    Op->>WP: wp plugin install woocommerce --activate
+    Op->>WP: wp wc product create (template products)
+    Op->>WP: wp option update (HPOS, COD, homepage)
+    Op->>WP: Generate WC API keys → K8s Secret
+
+    Op->>WP: HTTP GET /shop (health check)
+    Op->>WP: wp wc product list --format=count (> 0)
+    Op->>K8s: phase = Ready, url = http://{id}.domain/shop
+
+    Dash->>API: GET /api/stores (poll)
+    API-->>Dash: [{phase: Ready, url: ...}]
+    Dash-->>User: Store is live!
+```
+
+## Tradeoffs & Alternatives
+
+| Decision | Chose | Alternative | Rationale |
+|---|---|---|---|
+| State management | CRD + operator reconciliation | Direct provisioning from API | Crash recovery is free, kubectl is a first-class client, upgrades are CRD patches |
+| Isolation model | Namespace per store | Label-based isolation | Namespaces give real RBAC, NetworkPolicy, and ResourceQuota boundaries |
+| Helm install flag | `--wait` | `--atomic` | `--atomic` deletes failed releases (and PVCs/data); `--wait` preserves them for retry |
+| WP-CLI execution | `kubectl exec` into running pod | Kubernetes Jobs | Jobs consume quota, need cleanup, add latency; exec is faster and simpler |
+| Watch reliability | Watch + 30s periodic sync | Watch only | Watches disconnect silently; sync is the consistency guarantee |
+| Leader election | K8s Lease API | etcd lock / external coordinator | Native K8s primitive, no external dependencies, 15s failover |
+| Dashboard updates | 5s polling | WebSocket / SSE | Polling is simpler, works through proxies/load balancers, acceptable latency for this use case |

@@ -1,0 +1,46 @@
+{
+    "name": "arrakis-k8s-skills",
+    "owner": {
+        "name": "Ishaan",
+        "email": "your-email@example.com"
+    },
+    "metadata": {
+        "description": "Skills for building Arrakis - Kubernetes-native multi-tenant store provisioning platform",
+        "version": "1.0.0"
+    },
+    "plugins": [
+        {
+            "name": "core-development",
+            "description": "Essential skills for Kubernetes operator development, testing, and debugging",
+            "source": "./",
+            "strict": false,
+            "skills": [
+                "./skills/test-driven-development",
+                "./skills/systematic-debugging",
+                "./skills/verification-before-completion",
+                "./skills/defense-in-depth"
+            ]
+        },
+        {
+            "name": "project-execution",
+            "description": "Planning and execution skills for 5-day sprint with clear milestones",
+            "source": "./",
+            "strict": false,
+            "skills": [
+                "./skills/writing-plans",
+                "./skills/executing-plans",
+                "./skills/root-cause-tracing"
+            ]
+        },
+        {
+            "name": "automation-testing",
+            "description": "Web automation and end-to-end testing for WooCommerce checkout verification",
+            "source": "./",
+            "strict": false,
+            "skills": [
+                "./skills/webapp-testing",
+                "./skills/web-artifacts-builder"
+            ]
+        }
+    ]
+}

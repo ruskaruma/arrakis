@@ -1,144 +1,137 @@
 # Arrakis
 
-Multi-tenant store provisioning on Kubernetes. Create fully-configured WooCommerce stores with a single API call. Each store gets its own namespace with resource isolation, networking policies, and automated cleanup.
+Multi-tenant WooCommerce provisioning platform on Kubernetes. Spin up fully-configured, isolated e-commerce stores with a single API call. Each store gets its own namespace, resource quotas, network policies, Helm-managed lifecycle, and automated cleanup.
 
-**Features:** GitHub OAuth, per-user store ownership, store naming, 7 product templates (general/fashion/food/electronics/beauty/sports/books), light/dark theme, HPOS, validating admission webhook, CRD-driven upgrades & Helm rollback with revision history, live provisioning timer, MedusaJS engine planned (Q2 2026).
+```mermaid
+graph LR
+    User([User]) -->|GitHub OAuth| Dashboard
+    Dashboard -->|REST| API
+    API -->|CRD CRUD| K8s[Kubernetes API]
+    K8s -->|Watch + Sync| Operator
+    Operator -->|Helm install| NS["Namespace: store-{id}<br/>WordPress + MariaDB<br/>+ ResourceQuota<br/>+ NetworkPolicies"]
+```
 
-## Prerequisites
+## Features
 
-- Node.js 22+ (required for @kubernetes/client-node v1.4.0 ESM support)
-- Docker
-- kubectl
-- Helm 3
-- k3d (local) or k3s (production)
-- GitHub OAuth App (for authentication — or set `SKIP_AUTH=true` for local dev)
+- **One-click store creation** — pick a template, get a live WooCommerce store
+- **7 themed templates** — general, fashion, food, electronics, beauty, sports, books
+- **CRD-driven lifecycle** — upgrades, rollbacks, retry, deletion all through the K8s API
+- **Per-tenant isolation** — dedicated namespace, ResourceQuota, LimitRange, 8 NetworkPolicies
+- **Helm revision history** — view revisions, rollback to any previous version from the dashboard
+- **GitHub OAuth** — per-user ownership, scoped access to your stores only
+- **Validating admission webhook** — rejects invalid CRDs at the API server level
+- **Leader-elected operator** — Lease-based HA with automatic failover
+- **Live provisioning UI** — elapsed timer, phase steps, event timeline, resource metrics
+- **Audit logging** — every action logged with timestamp, store ID, and client IP
+- **Light/dark theme** — system-aware with manual toggle
 
-## Local Setup (k3d)
+## Quick Start
 
-### 1. Create cluster
+### Prerequisites
+
+| Tool | Version | Install |
+|------|---------|---------|
+| Node.js | 22+ | [nodejs.org](https://nodejs.org) |
+| Docker | any | [docs.docker.com](https://docs.docker.com/get-docker) |
+| kubectl | any | [kubernetes.io](https://kubernetes.io/docs/tasks/tools) |
+| Helm | 3.x | [helm.sh](https://helm.sh/docs/intro/install) |
+| k3d | any | [k3d.io](https://k3d.io) |
+
+### Automated Setup
+
+```bash
+git clone https://github.com/yourusername/arrakis.git
+cd arrakis
+chmod +x setup.sh
+./setup.sh
+```
+
+The script handles everything: creates a k3d cluster, applies CRDs, builds Helm dependencies, installs npm packages, and starts the operator, API, and dashboard. Once complete:
+
+| Service | URL |
+|---------|-----|
+| Dashboard | [http://localhost:5173](http://localhost:5173) |
+| API | [http://localhost:8080](http://localhost:8080) |
+| Swagger Docs | [http://localhost:8080/api/docs](http://localhost:8080/api/docs) |
+
+```bash
+# Flags
+./setup.sh --skip-cluster   # reuse existing k3d cluster
+./setup.sh --with-auth       # enable GitHub OAuth (requires .env)
+```
+
+<details>
+<summary><strong>Manual Setup (step by step)</strong></summary>
+
+#### 1. Create cluster
 
 ```bash
 k3d cluster create arrakis --port "80:80@loadbalancer"
 ```
 
-### 2. Apply CRD and RBAC
+#### 2. Apply CRD and RBAC
 
 ```bash
 kubectl apply -f config/crd.yaml
 kubectl apply -f config/rbac.yaml
 ```
 
-### 3. Build Helm dependencies
+#### 3. Build Helm dependencies
 
 ```bash
-cd helm-charts/woocommerce
-helm dependency build
-cd ../..
+cd helm-charts/woocommerce && helm dependency build && cd ../..
 ```
 
-### 4. Start the operator
+#### 4. Start operator
 
 ```bash
-cd operator
-npm install
-npx ts-node src/index.ts
+cd operator && npm install
+SKIP_LEADER_ELECTION=true npx ts-node src/index.ts
 ```
 
-### 5. Start the API (separate terminal)
+#### 5. Start API (separate terminal)
 
 ```bash
-cd api
-npm install
-
-# For local dev without OAuth:
+cd api && npm install
 SKIP_AUTH=true npx ts-node src/server.ts
-
-# With GitHub OAuth:
-# Create a .env file with:
-#   GITHUB_CLIENT_ID=<your-client-id>
-#   GITHUB_CLIENT_SECRET=<your-client-secret>
-#   SESSION_SECRET=<random-string>
-#   DASHBOARD_URL=http://localhost:5173
-#   GITHUB_CALLBACK_URL=http://localhost:8080/auth/github/callback
-npx ts-node src/server.ts
 ```
 
-API runs on port 8080.
-
-### 6. Start the dashboard (separate terminal)
+#### 6. Start dashboard (separate terminal)
 
 ```bash
-cd dashboard
-npm install
-npm run dev
+cd dashboard && npm install && npm run dev
 ```
 
-Dashboard runs on port 5173. Open http://localhost:5173.
+</details>
 
-## Production Setup (k3s VPS)
+<details>
+<summary><strong>GitHub OAuth Setup</strong></summary>
 
-### 1. Install k3s
+Create a GitHub OAuth App at [github.com/settings/developers](https://github.com/settings/developers) with callback URL `http://localhost:8080/auth/github/callback`, then create `api/.env`:
+
+```env
+GITHUB_CLIENT_ID=<your-client-id>
+GITHUB_CLIENT_SECRET=<your-client-secret>
+SESSION_SECRET=<random-string>
+DASHBOARD_URL=http://localhost:5173
+GITHUB_CALLBACK_URL=http://localhost:8080/auth/github/callback
+```
+
+Then start the API without `SKIP_AUTH`:
 
 ```bash
-curl -sfL https://get.k3s.io | sh -
+cd api && npx ts-node src/server.ts
 ```
 
-### 2. Install nginx ingress controller
-
-```bash
-helm repo add ingress-nginx https://kubernetes.github.io/ingress-nginx
-helm install ingress-nginx ingress-nginx/ingress-nginx -n ingress-nginx --create-namespace
-```
-
-### 3. Install cert-manager for TLS
-
-```bash
-helm repo add jetstack https://charts.jetstack.io
-helm install cert-manager jetstack/cert-manager -n cert-manager --create-namespace --set crds.enabled=true
-```
-
-### 4. Install Longhorn for distributed storage
-
-```bash
-helm repo add longhorn https://charts.longhorn.io
-helm install longhorn longhorn/longhorn -n longhorn-system --create-namespace
-```
-
-### 5. Apply CRD and RBAC
-
-```bash
-kubectl apply -f config/crd.yaml
-kubectl apply -f config/rbac.yaml
-```
-
-### 6. Start operator with production values
-
-The operator uses `helm-charts/woocommerce/values-prod.yaml` which configures:
-- nginx ingress (instead of traefik)
-- cert-manager TLS with Let's Encrypt
-- Longhorn distributed storage (instead of local-path)
-- 2 WordPress replicas with PodDisruptionBudget
-- Pod anti-affinity for node spread
-- Hardened container security (runAsNonRoot, drop ALL capabilities)
-- 10Gi storage per store (instead of 1Gi)
-
-Point the operator at the prod values file and set your domain:
-
-```bash
-cd operator
-npm install
-HELM_VALUES=../helm-charts/woocommerce/values-prod.yaml npx ts-node src/index.ts
-```
-
-For production DNS, configure a wildcard A record (`*.yourdomain.com`) pointing to the VPS IP. The operator sets each store's hostname to `{storeId}.yourdomain.com`.
+</details>
 
 ## Usage
 
 ### Create a store
 
-**Via dashboard:** Open http://localhost:5173, click "Create Store", enter a name, choose a template, and create.
+**Dashboard:** Open [http://localhost:5173](http://localhost:5173), click "Create Store", pick a template, hit create.
 
-**Via API:**
+**API:**
 
 ```bash
 curl -X POST http://localhost:8080/api/stores \
@@ -146,168 +139,67 @@ curl -X POST http://localhost:8080/api/stores \
   -d '{"engine": "woocommerce", "storeName": "My Fashion Store", "template": "fashion"}'
 ```
 
-Response:
-
 ```json
 {
   "id": "s86c8ba38",
   "engine": "woocommerce",
   "storeName": "My Fashion Store",
   "template": "fashion",
-  "owner": "12345678",
   "phase": "Pending",
-  "url": null,
-  "message": null,
-  "createdAt": "2026-02-11T15:00:00Z",
-  "startedAt": null,
-  "readyAt": null
+  "url": null
 }
 ```
 
-Templates: `general` (default), `fashion`, `food`, `electronics`, `beauty`, `sports`, `books`. Each seeds different themed products.
+The store progresses through the provisioning pipeline:
 
-The store progresses through: Pending -> Provisioning -> Configuring -> Verifying -> Ready. This takes 1-3 minutes depending on cluster resources.
-
-### Access a store
-
-Once the phase is `Ready`, the store is live at the URL in the response:
-
-```
-http://s1a2b3c4d.127.0.0.1.nip.io/shop
-```
-
-The store comes pre-configured with:
-- WooCommerce plugin installed and activated
-- HPOS (High-Performance Order Storage) enabled
-- Template products seeded (e.g., fashion: Desert Silk Robe, Stillsuit Jacket, Fremen Sandals)
-- Cash on Delivery payment method enabled
-- Shop page set as homepage
-
-### Place an order
-
-1. Go to the store URL (`/shop`)
-2. Add "Arrakis Spice Blend" to cart
-3. Proceed to checkout
-4. Fill in billing details (any test data)
-5. Select "Cash on Delivery"
-6. Place order
-
-Or via WP REST API:
-
-```bash
-STORE_URL="http://s1a2b3c4d.127.0.0.1.nip.io"
-
-# Get product ID
-PRODUCT_ID=$(curl -s "$STORE_URL/wp-json/wc/v3/products?search=Arrakis" \
-  -u "user:$(kubectl exec -n store-s1a2b3c4d deploy/store-s1a2b3c4d-wordpress -- wp user meta get 1 woocommerce_api_key --allow-root 2>/dev/null)" \
-  | python3 -c "import sys,json; print(json.load(sys.stdin)[0]['id'])")
-
-# Place order
-curl -X POST "$STORE_URL/wp-json/wc/v3/orders" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "payment_method": "cod",
-    "billing": {"first_name":"Test","last_name":"User","email":"test@test.com","address_1":"123 St","city":"City","postcode":"12345","country":"US"},
-    "line_items": [{"product_id": '"$PRODUCT_ID"', "quantity": 1}]
-  }'
+```mermaid
+graph LR
+    A[Pending] --> B[Provisioning]
+    B --> C[Configuring]
+    C --> D[Verifying]
+    D --> E[Ready]
+    B -.->|timeout/error| F[Failed]
+    C -.->|timeout/error| F
+    D -.->|verification failed| F
 ```
 
-### List stores
+Once `Ready`, the store is live at the URL in the response (e.g., `http://s86c8ba38.127.0.0.1.nip.io/shop`).
 
-```bash
-curl http://localhost:8080/api/stores
-```
+### Templates
 
-### Delete a store
+Each template seeds different themed products:
 
-```bash
-curl -X DELETE http://localhost:8080/api/stores/s1a2b3c4d
-```
-
-Or via `kubectl delete store s1a2b3c4d`. The finalizer ensures the namespace, Helm release, and all resources are cleaned up before the CRD is removed.
-
-### View events
-
-```bash
-# All events
-curl http://localhost:8080/api/events
-
-# Events for a specific store
-curl http://localhost:8080/api/stores/s1a2b3c4d/events
-```
-
-## API Endpoints
-
-| Method | Path | Description |
-|--------|------|-------------|
-| GET | /auth/github | Initiate GitHub OAuth flow |
-| GET | /auth/github/callback | OAuth callback |
-| GET | /auth/me | Get current user |
-| POST | /auth/logout | Logout |
-| POST | /api/stores | Create a store (rate-limited: 10/15min, max 10 per user) |
-| GET | /api/stores | List authenticated user's stores |
-| GET | /api/stores/:id | Get a single store |
-| DELETE | /api/stores/:id | Delete a store (finalizer-based cleanup) |
-| POST | /api/stores/:id/retry | Retry a Failed store (resets to Pending) |
-| POST | /api/stores/:id/upgrade | Upgrade a store (version, helmValues) |
-| POST | /api/stores/:id/rollback | Rollback to a previous Helm revision |
-| GET | /api/stores/:id/revisions | Helm revision history |
-| GET | /api/stores/:id/credentials | WP-Admin username/password |
-| GET | /api/stores/:id/metrics | Pod resource usage and storage |
-| GET | /api/stores/:id/products | List WooCommerce products |
-| POST | /api/stores/:id/products | Create a product (name, regular_price, images) |
-| DELETE | /api/stores/:id/products/:productId | Delete a product |
-| GET | /api/stores/:id/events | Kubernetes events for a store's namespace |
-| GET | /api/events | Events across authenticated user's stores |
-| GET | /api/stats | Store count by phase, avg provision time |
-| GET | /api/audit | Audit log (last 1000 actions with IP/timestamp) |
-| GET | /api/docs | OpenAPI/Swagger documentation |
-| GET | /health | API health check |
-
-All `/api/*` routes require authentication (GitHub OAuth session or `SKIP_AUTH=true`). All store endpoints enforce per-user ownership. MedusaJS engine returns 501 (Q2 2026 roadmap).
-
-## Project Structure
-
-```
-operator/src/       Kubernetes operator (1,164 lines — reconciler, webhook, WP-CLI, Helm, metrics)
-api/src/            REST API (437 lines — Express.js, GitHub OAuth, store routes)
-dashboard/src/      React dashboard (892 lines — store cards, template picker, activity log)
-config/             CRD, RBAC, HPA, webhook, deployment manifests
-helm-charts/
-  woocommerce/      Bitnami WordPress subchart (values-local + values-prod)
-  medusajs/         MedusaJS skeleton chart (PostgreSQL + Redis)
-```
-
-**Total:** 25 TypeScript source files, 2,493 lines. 19 YAML config files.
-
-## Upgrades & Rollback
-
-Upgrades and rollbacks are CRD-driven: the API patches the Store CRD and the operator reconciles the change.
+| Template | Products |
+|----------|----------|
+| `general` | Arrakis Spice Blend ($42) |
+| `fashion` | Desert Silk Robe ($89), Stillsuit Jacket ($149), Fremen Sandals ($59) |
+| `food` | Spice Melange Tea ($24), Arrakeen Coffee Beans ($32), Sietch Bread Mix ($12) |
+| `electronics` | Holtzman Shield Generator ($299), Ornithopter Navigation Module ($199), Thumper Device ($79) |
+| `beauty` | Spice Essence Perfume ($68), Desert Rose Skin Oil ($45), Sietch Mineral Soap ($18) |
+| `sports` | Sandworm Rider Harness ($185), Fremen Combat Training Kit ($120), Desert Running Sandals ($75) |
+| `books` | The Collected Sayings of Muad'Dib ($32), Ecology of Dune ($28), The Orange Catholic Bible ($55) |
 
 ### Upgrade a store
 
 ```bash
-# Via API — patches spec.version, triggers helm upgrade in the operator:
 curl -X POST http://localhost:8080/api/stores/{id}/upgrade \
   -H "Content-Type: application/json" \
   -d '{"version": "1.1.0"}'
 ```
 
-The operator detects the spec change (generation > observedGeneration), sets phase to `Upgrading`, and runs `helm upgrade --wait`. On failure, it auto-rollbacks to the previous revision. The dashboard shows the current Helm revision and upgrade timestamp.
+The operator detects the spec change, runs `helm upgrade --wait`, and auto-rollbacks on failure.
 
 ### Rollback to a previous revision
 
 ```bash
-# Via API — rollback to a specific revision:
+# Rollback to a specific revision
 curl -X POST http://localhost:8080/api/stores/{id}/rollback \
   -H "Content-Type: application/json" \
   -d '{"revision": 1}'
 
-# View revision history:
+# View revision history
 curl http://localhost:8080/api/stores/{id}/revisions
 ```
-
-The operator sets phase to `RollingBack` and runs `helm rollback`. The dashboard shows a revision history table with rollback buttons.
 
 ### Retry a failed store
 
@@ -315,25 +207,282 @@ The operator sets phase to `RollingBack` and runs `helm rollback`. The dashboard
 curl -X POST http://localhost:8080/api/stores/{id}/retry
 ```
 
-Resets the store to `Pending` for a fresh provisioning attempt.
+### Place an order
 
-### Horizontal Pod Autoscaling
+Once a store is `Ready`, go to its URL (e.g., `http://s86c8ba38.127.0.0.1.nip.io/shop`):
 
-HPA manifests are provided in `config/hpa-operator.yaml` and `config/hpa-api.yaml`:
+1. Browse the storefront — template products are already listed
+2. Add a product to cart
+3. Go to checkout
+4. Fill in any billing details (test data is fine)
+5. Select "Cash on Delivery" as payment
+6. Place order
+
+The order is stored in WooCommerce's HPOS tables (High-Performance Order Storage) for fast queries.
+
+### Delete a store
 
 ```bash
-kubectl apply -f config/hpa-operator.yaml
-kubectl apply -f config/hpa-api.yaml
+curl -X DELETE http://localhost:8080/api/stores/{id}
 ```
 
-The operator scales 1-3 replicas on CPU (70%) and memory (80%). The API scales 1-5 replicas on CPU (70%). See `ARCHITECTURE.md` for scaling constraints (single-leader operator pattern).
+The finalizer ensures namespace, Helm release, and all resources are cleaned up before the CRD is removed.
+
+### Manage products
+
+```bash
+# List products
+curl http://localhost:8080/api/stores/{id}/products
+
+# Add a product
+curl -X POST http://localhost:8080/api/stores/{id}/products \
+  -H "Content-Type: application/json" \
+  -d '{"name": "Shai-Hulud Figurine", "regular_price": "45.00"}'
+
+# Delete a product
+curl -X DELETE http://localhost:8080/api/stores/{id}/products/{productId}
+```
+
+## API Reference
+
+All `/api/*` routes require authentication (GitHub OAuth session or `SKIP_AUTH=true`). All store-specific endpoints enforce per-user ownership.
+
+### Authentication
+
+| Method | Path | Description |
+|--------|------|-------------|
+| `GET` | `/auth/github` | Initiate GitHub OAuth flow |
+| `GET` | `/auth/github/callback` | OAuth callback |
+| `GET` | `/auth/me` | Get current user |
+| `POST` | `/auth/logout` | Logout |
+
+### Stores
+
+| Method | Path | Description | Status |
+|--------|------|-------------|--------|
+| `POST` | `/api/stores` | Create a store | `201` |
+| `GET` | `/api/stores` | List your stores | `200` |
+| `GET` | `/api/stores/:id` | Get a store | `200` |
+| `DELETE` | `/api/stores/:id` | Delete a store | `204` |
+| `POST` | `/api/stores/:id/retry` | Retry a failed store | `202` |
+| `POST` | `/api/stores/:id/upgrade` | Upgrade (version, helmValues) | `202` |
+| `POST` | `/api/stores/:id/rollback` | Rollback to a Helm revision | `202` |
+
+### Store Data
+
+| Method | Path | Description |
+|--------|------|-------------|
+| `GET` | `/api/stores/:id/revisions` | Helm revision history |
+| `GET` | `/api/stores/:id/credentials` | WP-Admin username/password |
+| `GET` | `/api/stores/:id/metrics` | Pod CPU/memory and storage |
+| `GET` | `/api/stores/:id/events` | Kubernetes events |
+| `GET` | `/api/stores/:id/products` | WooCommerce products |
+| `POST` | `/api/stores/:id/products` | Create a product |
+| `DELETE` | `/api/stores/:id/products/:productId` | Delete a product |
+
+### Global
+
+| Method | Path | Description |
+|--------|------|-------------|
+| `GET` | `/api/stats` | Store counts by phase, avg provision time |
+| `GET` | `/api/events` | Events across all your stores |
+| `GET` | `/api/audit` | Audit log (last 1000 actions) |
+| `GET` | `/api/docs` | OpenAPI / Swagger UI |
+| `GET` | `/health` | API health check |
+
+## Project Structure
+
+```
+arrakis/
+├── operator/src/           Kubernetes operator (TypeScript)
+│   ├── index.ts            Entry point — watch stream + periodic sync + leader election
+│   ├── reconciler.ts       State machine — provisions, upgrades, rollbacks, deletes stores
+│   ├── helm-manager.ts     Helm CLI wrapper — install, upgrade, rollback, history
+│   ├── woocommerce-setup.ts  WP-CLI orchestration — plugins, products, HPOS, API keys
+│   ├── store-verifier.ts   Health check — HTTP 200 + product count > 0
+│   ├── webhook.ts          Validating admission webhook (TLS on :9443)
+│   ├── leader-election.ts  Lease-based leader election (coordination.k8s.io)
+│   ├── k8s-helpers.ts      Namespace, quota, policies, status updates, finalizers
+│   ├── kubectl.ts          kubectl exec wrapper for WP-CLI
+│   ├── metrics.ts          /healthz endpoint (:9091)
+│   ├── types.ts            Store CRD TypeScript types
+│   └── logger.ts           Structured JSON logging
+│
+├── api/src/                REST API (Express.js)
+│   ├── server.ts           Express app — CORS, sessions, OAuth, rate limiting
+│   ├── routes/stores.ts    All store endpoints — CRUD, upgrade, rollback, products
+│   ├── k8s/client.ts       Kubernetes client — CRD operations, metrics, WC API proxy
+│   ├── auth/github.ts      Passport GitHub OAuth strategy
+│   ├── auth/middleware.ts   isAuthenticated middleware
+│   └── openapi.ts          OpenAPI 3.0 spec
+│
+├── dashboard/src/          React dashboard (Vite + Tailwind CSS 4)
+│   ├── App.tsx             Main app — routing, polling, auth state
+│   ├── api.ts              API client — typed fetch wrappers
+│   ├── components/
+│   │   ├── StoreCard.tsx    Store card — status, actions, events, products, metrics
+│   │   ├── StoreDetail.tsx  Full store view — revisions, commands, CRD info
+│   │   ├── CreateStoreModal.tsx  Store creation form with template picker
+│   │   ├── Header.tsx       Nav bar with theme toggle
+│   │   ├── StatsBar.tsx     Phase counts and avg provision time
+│   │   ├── ActivityLog.tsx  Global event timeline
+│   │   ├── EmptyState.tsx   Empty state illustration
+│   │   ├── LoginPage.tsx    GitHub OAuth login
+│   │   └── Toast.tsx        Toast notification system
+│   ├── ThemeContext.tsx     Light/dark theme provider
+│   ├── utils.ts            timeAgo, formatDuration helpers
+│   └── index.css           Tailwind + CSS variables
+│
+├── config/                 Kubernetes manifests
+│   ├── crd.yaml            Store CRD (arrakis.io/v1alpha1)
+│   ├── rbac.yaml           ServiceAccount + ClusterRole + Binding
+│   ├── webhook.yaml        ValidatingWebhookConfiguration
+│   ├── hpa-operator.yaml   HPA for operator (1-3 replicas, 70% CPU)
+│   ├── hpa-api.yaml        HPA for API (1-5 replicas, 70% CPU)
+│   ├── *-deployment.yaml   Deployment manifests for all components
+│   └── scripts/            Cert generation for webhook TLS
+│
+├── helm-charts/
+│   └── woocommerce/        Bitnami WordPress subchart
+│       ├── Chart.yaml
+│       ├── values-local.yaml   k3d / local dev values
+│       └── values-prod.yaml    k3s / production values
+│
+├── setup.sh                Automated local setup script
+└── ARCHITECTURE.md         Detailed system design document
+```
+
+## Production Deployment (k3s)
+
+<details>
+<summary><strong>Full production setup guide</strong></summary>
+
+### 1. Install k3s
+
+```bash
+curl -sfL https://get.k3s.io | sh -
+```
+
+### 2. Install infrastructure
+
+```bash
+# Ingress controller
+helm repo add ingress-nginx https://kubernetes.github.io/ingress-nginx
+helm install ingress-nginx ingress-nginx/ingress-nginx -n ingress-nginx --create-namespace
+
+# TLS via Let's Encrypt
+helm repo add jetstack https://charts.jetstack.io
+helm install cert-manager jetstack/cert-manager -n cert-manager --create-namespace --set crds.enabled=true
+
+# Distributed storage
+helm repo add longhorn https://charts.longhorn.io
+helm install longhorn longhorn/longhorn -n longhorn-system --create-namespace
+```
+
+### 3. Apply CRD, RBAC, and set domain
+
+```bash
+kubectl apply -f config/crd.yaml
+kubectl apply -f config/rbac.yaml
+```
+
+Configure a wildcard DNS record (`*.yourdomain.com`) pointing to the VPS IP.
+
+### 4. Start with production config
+
+```bash
+cd operator && npm install
+STORE_BASE_DOMAIN=yourdomain.com npx ts-node src/index.ts
+```
+
+### Local vs Production differences
+
+| Concern | Local | Production |
+|---|---|---|
+| Cluster | k3d | k3s on VPS |
+| Ingress | Traefik (k3d default) | nginx-ingress |
+| TLS | None (HTTP) | cert-manager + Let's Encrypt |
+| Storage | local-path (1Gi) | Longhorn distributed (10Gi) |
+| WordPress replicas | 1 | 2 + PodDisruptionBudget |
+| Container security | runAsNonRoot, drop ALL | + readOnlyRootFilesystem |
+| DNS | nip.io wildcard | Real domain wildcard A record |
+
+</details>
+
+## Horizontal Pod Autoscaling
+
+HPA manifests are provided for both the operator and API:
+
+```bash
+kubectl apply -f config/hpa-operator.yaml   # 1-3 replicas at 70% CPU
+kubectl apply -f config/hpa-api.yaml         # 1-5 replicas at 70% CPU
+```
+
+The operator uses Lease-based leader election — only the leader reconciles. Standby replicas serve the admission webhook and health endpoint.
 
 ## Tech Stack
 
-- **Operator**: TypeScript, @kubernetes/client-node v1.4.0
-- **API**: Express.js, passport-github2, express-session, express-rate-limit
-- **Dashboard**: React 19, Vite 7, Tailwind CSS 4
-- **Helm**: Chart API v2, Bitnami WordPress 28.x
-- **Cluster**: k3d (local), k3s (production)
-- **DNS**: nip.io wildcard (local), real domain (production)
-- **Deployed**: AWS EC2 c7i-flex.large, k3s, 54.206.104.15
+| Layer | Technology |
+|-------|-----------|
+| Operator | TypeScript, @kubernetes/client-node v1.4.0 |
+| API | Express.js, passport-github2, express-session, express-rate-limit |
+| Dashboard | React 19, Vite 7, Tailwind CSS 4 |
+| Helm | Chart API v2, Bitnami WordPress 28.x |
+| Cluster | k3d (local), k3s (production) |
+| DNS | nip.io wildcard (local), real domain (production) |
+
+## System Design & Tradeoffs
+
+```mermaid
+graph TB
+    subgraph "Control Plane"
+        API["REST API<br/>(Express.js :8080)"]
+        OP["Operator<br/>(TypeScript)"]
+        WH["Admission Webhook<br/>(:9443)"]
+    end
+
+    subgraph "Data Plane — per store"
+        NS["Namespace: store-{id}"]
+        WP["WordPress<br/>(Bitnami)"]
+        DB["MariaDB<br/>(StatefulSet)"]
+        PVC["PVC<br/>(persistent storage)"]
+        RQ["ResourceQuota"]
+        NP["8 NetworkPolicies"]
+    end
+
+    Dashboard -->|polls every 5s| API
+    API -->|creates/patches CRD| K8s["K8s API Server"]
+    K8s -->|validates| WH
+    K8s -->|watch + 30s sync| OP
+    OP -->|helm upgrade --install| NS
+    NS --- WP
+    NS --- DB
+    NS --- PVC
+    NS --- RQ
+    NS --- NP
+```
+
+**Why CRD + operator over direct provisioning?** The API only writes CRDs — the operator reconciles desired state. This means: crash recovery is free (operator re-reads CRDs on restart), upgrades/rollbacks are just CRD patches, and `kubectl` is a first-class client alongside the dashboard.
+
+**Why namespace-per-store over labels?** Namespaces give real security boundaries: NetworkPolicy scope, ResourceQuota enforcement, RBAC isolation, and clean teardown (`kubectl delete ns` removes everything). The overhead is negligible at expected scale (tens to hundreds of stores).
+
+**Why `helm upgrade --install --wait` over `--atomic`?** `--atomic` auto-deletes failed releases including PVCs and data. `--wait` leaves failed releases in place for diagnosis and retry without data loss.
+
+**Why `kubectl exec` for WP-CLI over Kubernetes Jobs?** Jobs create extra pods (consuming quota), need cleanup, and add latency. Direct exec into the running WordPress pod is faster and uses the same container that serves traffic.
+
+## Architecture
+
+See [ARCHITECTURE.md](./ARCHITECTURE.md) for the full system design document covering:
+
+- Reconciler state machine and dual-mode reconciliation
+- CRD schema and phase transitions
+- Tenant isolation (ResourceQuota, LimitRange, NetworkPolicies)
+- Leader election protocol
+- Security posture (webhook, RBAC, container hardening, audit logging)
+- Upgrade/rollback mechanics
+- Idempotency and crash recovery
+- Tradeoffs and alternatives considered
+
+---
+
+This project was made by **Ishaan Sinha**.
