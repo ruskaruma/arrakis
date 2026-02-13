@@ -1,0 +1,23 @@
+[Unit]
+Description=Arrakis API
+After=k3s.service
+Requires=k3s.service
+
+[Service]
+Type=simple
+User=ubuntu
+WorkingDirectory=/home/ubuntu/arrakis/api
+Environment=KUBECONFIG=/home/ubuntu/.kube/config
+Environment=PORT=8080
+Environment=SKIP_AUTH=false
+Environment=DASHBOARD_URL=http://arrakis.ruskaruma.me:3000
+Environment=SESSION_SECRET=arrakis-vps-prod-secret-2026
+Environment=GITHUB_CLIENT_ID=Ov23liJgIgyYEVtTaAMg
+Environment=GITHUB_CLIENT_SECRET=51f8ca1ad17301763f2c3f3589fe82172cb1c97a
+Environment=GITHUB_CALLBACK_URL=http://api.arrakis.ruskaruma.me:8080/auth/github/callback
+ExecStart=/usr/bin/node dist/server.js
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
