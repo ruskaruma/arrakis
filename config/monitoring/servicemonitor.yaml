@@ -1,0 +1,36 @@
+ apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: arrakis-operator
+  namespace: monitoring
+  labels:
+    app: arrakis-operator
+    release: kube-prometheus-stack
+spec:
+  namespaceSelector:
+    matchNames:
+      - default
+  selector:
+    matchLabels:
+      app: arrakis-operator
+  endpoints:
+    - port: metrics
+      interval: 15s
+      path: /metrics
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: arrakis-operator-metrics
+  namespace: default
+  labels:
+    app: arrakis-operator
+spec:
+  selector:
+    app: arrakis-operator
+  ports:
+    - name: metrics
+      port: 9091
+      targetPort: 9091
+      protocol: TCP
+  type: ClusterIP

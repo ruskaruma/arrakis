@@ -131,7 +131,7 @@ All differences are expressed through Helm values files (`values-local.yaml` vs 
 - **`readOnlyRootFilesystem: true`** in container security context
 - **Wildcard DNS** — `*.yourdomain.com` A record pointing to VPS IP; each store gets `{id}.yourdomain.com`
 
-Deployed on AWS EC2 (c7i-flex.large) running k3s.
+Deployed on AWS EC2 (ap-southeast-2, c7i-flex.large) running k3s, accessible at [`arrakis.ruskaruma.me`](http://arrakis.ruskaruma.me:3000).
 
 ## 2. Multi-Tenant Isolation
 

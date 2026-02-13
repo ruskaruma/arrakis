@@ -11,6 +11,12 @@ graph LR
     Operator -->|Helm install| NS["Namespace: store-{id}<br/>WordPress + MariaDB<br/>+ ResourceQuota<br/>+ NetworkPolicies"]
 ```
 
+### Live Demo
+
+Deployed on AWS EC2 (ap-southeast-2) with k3s, accessible at [`arrakis.ruskaruma.me`](http://arrakis.ruskaruma.me:3000).
+
+![Arrakis Dashboard — Live on AWS](./docs/dashboard-live.png)
+
 ## Features
 
 - **One-click store creation** — pick a template, get a live WooCommerce store
@@ -25,7 +31,30 @@ graph LR
 - **Audit logging** — every action logged with timestamp, store ID, and client IP
 - **Light/dark theme** — system-aware with manual toggle
 
-## Quick Start
+## Try It
+
+The platform is deployed live on AWS EC2 (ap-southeast-2) running k3s. Create a store and watch it provision in real time:
+
+| Service | URL |
+|---------|-----|
+| Dashboard | [`arrakis.ruskaruma.me`](http://arrakis.ruskaruma.me:3000) |
+| API | [`api.arrakis.ruskaruma.me`](http://api.arrakis.ruskaruma.me:8080) |
+
+Or via curl:
+
+```bash
+# Create a store
+curl -X POST http://api.arrakis.ruskaruma.me:8080/api/stores \
+  -H "Content-Type: application/json" \
+  -d '{"engine": "woocommerce", "storeName": "My Fashion Store", "template": "fashion"}'
+
+# List stores
+curl http://api.arrakis.ruskaruma.me:8080/api/stores
+```
+
+## Running Locally
+
+If you'd like to run Arrakis on your own machine, here's how.
 
 ### Prerequisites
 
@@ -40,13 +69,13 @@ graph LR
 ### Automated Setup
 
 ```bash
-git clone https://github.com/yourusername/arrakis.git
+git clone https://github.com/ruskaruma/arrakis.git
 cd arrakis
 chmod +x setup.sh
 ./setup.sh
 ```
 
-The script handles everything: creates a k3d cluster, applies CRDs, builds Helm dependencies, installs npm packages, and starts the operator, API, and dashboard. Once complete:
+The script creates a k3d cluster, applies CRDs, builds Helm dependencies, installs npm packages, and starts all three services. Once complete:
 
 | Service | URL |
 |---------|-----|
@@ -129,7 +158,7 @@ cd api && npx ts-node src/server.ts
 
 ### Create a store
 
-**Dashboard:** Open [http://localhost:5173](http://localhost:5173), click "Create Store", pick a template, hit create.
+**Dashboard:** Open the dashboard ([live](http://arrakis.ruskaruma.me:3000) or [local](http://localhost:5173)), click "Create Store", pick a template, hit create.
 
 **API:**
 
@@ -163,7 +192,7 @@ graph LR
     D -.->|verification failed| F
 ```
 
-Once `Ready`, the store is live at the URL in the response (e.g., `http://s86c8ba38.127.0.0.1.nip.io/shop`).
+Once `Ready`, the store is live at the URL in the response (e.g., `http://s86c8ba38.arrakis.ruskaruma.me/shop` on production or `http://s86c8ba38.127.0.0.1.nip.io/shop` locally).
 
 ### Templates
 
@@ -484,5 +513,9 @@ See [ARCHITECTURE.md](./ARCHITECTURE.md) for the full system design document cov
 - Tradeoffs and alternatives considered
 
 ---
+
+### A Note
+
+This was a heavy build. I spent a lot of late nights thinking through the architecture, reading Kubernetes docs, debugging Helm charts, and figuring out how all the pieces fit together. I wrote the majority of the code myself — the operator reconciler, leader election, CRD design, webhook, WP-CLI orchestration, API routes, and the overall system design were all me. That said, it was a big scope and I'm one person, so I leaned on Google and Claude (free tier) to help me move faster on boilerplate, figure out K8s client-node API quirks, and debug issues. Frontend and UI aren't my strongest suit, so the dashboard leans more on AI assistance than the backend does — if parts of the CSS or component structure look a bit cookie-cutter, that's why. I tried to make it functional and clean regardless. Everything in the architecture doc and the design decisions behind this project are genuinely mine.
 
 This project was made by **Ishaan Sinha**.
